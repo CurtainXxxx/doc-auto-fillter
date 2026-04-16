@@ -1,15 +1,15 @@
-"""高校教务评价报告生成工具 - 生成《专业课程目标达成度评价报告》Word文档"""
+"""高校教务评价报告生成工具 - 基于模板严格匹配格式生成Word文档"""
 
 import os
 import io
 import json
 import logging
+import copy
 from datetime import datetime
 
 from docx import Document
-from docx.shared import Pt, Cm, Inches, RGBColor
+from docx.shared import Pt, Emu
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from langchain.tools import tool
 from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 
 # 全局 S3 客户端（懒初始化）
 _s3_storage = None
+
+# 模板文件路径
+_TEMPLATE_PATH = os.path.join(
+    os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"),
+    "assets",
+    "template.docx",
+)
+
+# OOXML 命名空间
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 def _get_s3_storage() -> S3SyncStorage:
@@ -36,149 +46,167 @@ def _get_s3_storage() -> S3SyncStorage:
     return _s3_storage
 
 
-def _set_cell_text(cell, text, bold=False, font_size=10.5, alignment=WD_ALIGN_PARAGRAPH.CENTER):
-    """设置表格单元格文本样式"""
-    cell.text = ""
-    paragraph = cell.paragraphs[0]
-    paragraph.alignment = alignment
-    run = paragraph.add_run(text)
-    run.font.size = Pt(font_size)
-    run.font.name = "宋体"
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
-    run.bold = bold
+def _find_cell_containing(table, keyword: str):
+    """在表格中找到包含指定关键词的单元格，返回 (row_idx, col_idx, cell)"""
+    for r_idx, row in enumerate(table.rows):
+        for c_idx, cell in enumerate(row.cells):
+            if keyword in cell.text:
+                return r_idx, c_idx, cell
+    return None
 
 
-def _set_paragraph_text(paragraph, text, bold=False, font_size=12, alignment=WD_ALIGN_PARAGRAPH.LEFT, font_name="宋体"):
-    """设置段落文本样式"""
-    paragraph.alignment = alignment
-    run = paragraph.add_run(text)
-    run.font.size = Pt(font_size)
-    run.font.name = font_name
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), font_name)
-    run.bold = bold
+def _append_text_to_cell(cell, label: str, value: str):
+    """在已有label文本后追加value文本，保持相同的字体格式。
+    例如单元格已有"教学班级："，在其后追加具体班级名。
+    """
+    # 找到包含label的run，在其后追加value
+    for para in cell.paragraphs:
+        for run in para.runs:
+            if label in run.text:
+                # 在这个run后面追加一个新run，复制格式
+                run_elem = run._element
+                parent = run_elem.getparent()
+                new_run_elem = copy.deepcopy(run_elem)
+                # 清空新run的文本
+                for t_elem in new_run_elem.findall(qn("w:t")):
+                    t_elem.text = value
+                # 插入到当前run之后
+                run_elem.addnext(new_run_elem)
+                return
+    # 如果没找到label run，在最后一个段落末尾追加
+    last_para = cell.paragraphs[-1] if cell.paragraphs else cell.add_paragraph()
+    new_run = last_para.add_run(value)
+    new_run.font.name = "FangSong_GB2312"
+    new_run._element.rPr.rFonts.set(qn("w:eastAsia"), "FangSong_GB2312")
+
+
+def _set_cell_text_keep_format(cell, text: str):
+    """清空单元格内容并设置新文本，保持单元格原有的段落格式。
+    保留第一个段落的格式属性（对齐等），仅替换文本。
+    """
+    # 保存第一个段落的格式
+    if not cell.paragraphs:
+        return
+    
+    first_para = cell.paragraphs[0]
+    
+    # 清空所有现有run
+    for para in cell.paragraphs:
+        for run in list(para.runs):
+            run._element.getparent().remove(run._element)
+    
+    # 删除多余段落，只保留第一个
+    for para in cell.paragraphs[1:]:
+        para._element.getparent().remove(para._element)
+    
+    # 在第一个段落中添加新run
+    new_run = first_para.add_run(text)
+    new_run.font.name = "FangSong_GB2312"
+    new_run._element.rPr.rFonts.set(qn("w:eastAsia"), "FangSong_GB2312")
+
+
+def _add_table_row_after(table, after_row_idx: int):
+    """在指定行之后添加一行，复制该行的格式（合并信息、宽度等），但清空内容。
+    通过复制XML实现，确保格式完全一致。
+    """
+    src_row = table.rows[after_row_idx]
+    src_tr = src_row._element
+    tbl_element = table._element
+    
+    # 深拷贝源行
+    new_tr = copy.deepcopy(src_tr)
+    
+    # 清空新行中所有单元格的文本内容（保留格式）
+    for tc in new_tr.findall(qn("w:tc")):
+        for p in tc.findall(qn("w:p")):
+            for r in p.findall(qn("w:r")):
+                for t in r.findall(qn("w:t")):
+                    t.text = ""
+    
+    # 插入到源行之后
+    src_tr.addnext(new_tr)
+
+
+def _fill_table0(table, teaching_class: str, evaluator: str, participants: str, course_objectives: list):
+    """填充表格0：基本信息 + 课程目标与毕业要求的对应关系"""
+    
+    # ---- Row 1: 教学班级 / 评价责任人 / 参与人 ----
+    _append_text_to_cell(table.rows[1].cells[0], "教学班级：", teaching_class)
+    _append_text_to_cell(table.rows[1].cells[3], "评价责任人:", evaluator)
+    _append_text_to_cell(table.rows[1].cells[6], "参与人：", participants)
+    
+    # ---- Rows 4+: 课程目标数据行 ----
+    # 模板有3个空行(4,5,6)，用户需要4个课程目标
+    # 需要再添加1行
+    template_data_rows = 3  # 行4,5,6
+    needed_rows = len(course_objectives)
+    
+    if needed_rows > template_data_rows:
+        for _ in range(needed_rows - template_data_rows):
+            _add_table_row_after(table, table.rows.__len__() - 1)
+    
+    # 填入课程目标
+    # 表格0的数据行结构：
+    # 列0: 毕业要求 (1列)
+    # 列1-3: 毕业要求指标点 (3列合并)
+    # 列4-6: 课程目标 (3列合并)
+    data_start_row = 4
+    for i, obj in enumerate(course_objectives):
+        row_idx = data_start_row + i
+        if row_idx >= len(table.rows):
+            break
+        row = table.rows[row_idx]
+        # 课程目标填入合并列(列4-6)
+        _set_cell_text_keep_format(row.cells[4], f"课程目标{i+1}：{obj}")
+
+
+def _fill_table1(table, course_objectives: list):
+    """填充表格1：评价依据、考核分布、评价结果、总结改进"""
+    
+    # ---- Row 1: 课程目标标题行 ----
+    # 列1(g s=8): 课程目标1, 列2(gs=9): 课程目标2, 列3(gs=8): 课程目标3, 列4(gs=5): 课程目标4
+    # 这些标题已经在模板中，只是序号与用户目标对应
+    
+    # ---- Rows 10-13: 课程目标1-4行（期末考核分布）----
+    # 行10: 课程目标1, 行11: 课程目标2, 行12: 课程目标3, 行13: 课程目标4
+    # 这些标签已存在于模板中
+    
+    # ---- Rows 18-29: 评价结果 ----
+    # 每个课程目标3行(期末考试/平时成绩/实验成绩)
+    # 行18-20: 课程目标1, 行21-23: 课程目标2, 行24-26: 课程目标3, 行27-29: 课程目标4
+    # 在"课程目标"列填入标签
+    obj_col = 0  # 第0列
+    for i in range(len(course_objectives)):
+        base_row = 18 + i * 3
+        if base_row < len(table.rows):
+            # 课程目标列是垂直合并的，只在第一行（restart）写文本
+            _set_cell_text_keep_format(table.rows[base_row].cells[obj_col], f"课程目标{i+1}")
+    
+    # ---- Row 33: 课程总结与改进措施 ----
+    # 保持模板原有格式，无需额外填充
 
 
 def _build_report_docx(
     teaching_class: str,
     evaluator: str,
     participants: str,
-    course_objectives: list[str],
+    course_objectives: list,
 ) -> bytes:
     """
-    根据收集的信息构建《专业课程目标达成度评价报告》Word文档，
-    返回文档的二进制内容。
+    基于模板文件生成评价报告，确保格式与模板完全一致。
     """
-    doc = Document()
-
-    # ---- 全局默认样式 ----
-    style = doc.styles["Normal"]  # type: ignore[union-attr]
-    style.font.name = "宋体"  # type: ignore[union-attr]
-    style.font.size = Pt(12)  # type: ignore[union-attr]
-    style.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")  # type: ignore[union-attr]
-    style.paragraph_format.line_spacing = 1.5  # type: ignore[union-attr]
-
-    # ---- 标题 ----
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("专业课程目标达成度评价报告")
-    run.bold = True
-    run.font.size = Pt(22)
-    run.font.name = "黑体"
-    run._element.rPr.rFonts.set(qn("w:eastAsia"), "黑体")
-
-    # ---- 基本信息 ----
-    doc.add_paragraph()  # 空行
-    info_table = doc.add_table(rows=4, cols=4, style="Table Grid")
-    info_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-    info_data = [
-        ("教学班级", teaching_class, "评价责任人", evaluator),
-        ("参与人", participants, "评价日期", datetime.now().strftime("%Y年%m月%d日")),
-    ]
-
-    for row_idx, (label1, val1, label2, val2) in enumerate(info_data):
-        row = info_table.rows[row_idx]
-        _set_cell_text(row.cells[0], label1, bold=True, font_size=10.5)
-        _set_cell_text(row.cells[1], val1, font_size=10.5, alignment=WD_ALIGN_PARAGRAPH.LEFT)
-        _set_cell_text(row.cells[2], label2, bold=True, font_size=10.5)
-        _set_cell_text(row.cells[3], val2, font_size=10.5, alignment=WD_ALIGN_PARAGRAPH.LEFT)
-
-    # 合并第三行（"课程目标"标题行）
-    row_obj_title = info_table.rows[2]
-    row_obj_title.cells[0].merge(row_obj_title.cells[3])
-    _set_cell_text(row_obj_title.cells[0], "课程目标", bold=True, font_size=11)
-
-    # 合并第四行（课程目标内容）
-    row_obj_content = info_table.rows[3]
-    row_obj_content.cells[0].merge(row_obj_content.cells[3])
-    obj_text = "\n".join([f"目标{i+1}：{obj}" for i, obj in enumerate(course_objectives)])
-    _set_cell_text(row_obj_content.cells[0], obj_text, font_size=10.5, alignment=WD_ALIGN_PARAGRAPH.LEFT)
-
-    # ---- 一、课程目标及支撑毕业要求 ----
-    doc.add_paragraph()
-    h1 = doc.add_paragraph()
-    _set_paragraph_text(h1, "一、课程目标及支撑毕业要求", bold=True, font_size=14, font_name="黑体")
-
-    for i, obj in enumerate(course_objectives):
-        p = doc.add_paragraph()
-        _set_paragraph_text(p, f"课程目标{i+1}：{obj}", font_size=12)
-        # 为每个目标预留支撑毕业要求描述区域
-        p2 = doc.add_paragraph()
-        _set_paragraph_text(p2, "支撑毕业要求指标点：（待填写）", font_size=10.5)
-
-    # ---- 二、课程目标达成度评价表 ----
-    doc.add_paragraph()
-    h2 = doc.add_paragraph()
-    _set_paragraph_text(h2, "二、课程目标达成度评价表", bold=True, font_size=14, font_name="黑体")
-
-    # 评价表格：每个课程目标一行
-    eval_table = doc.add_table(rows=len(course_objectives) + 1, cols=6, style="Table Grid")
-    eval_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-
-    headers = ["课程目标", "考核方式", "权重", "达成度评分", "达成度评价结果", "备注"]
-    for col_idx, header in enumerate(headers):
-        _set_cell_text(eval_table.rows[0].cells[col_idx], header, bold=True, font_size=10)
-
-    for i, obj in enumerate(course_objectives):
-        row = eval_table.rows[i + 1]
-        _set_cell_text(row.cells[0], f"目标{i+1}", font_size=10)
-        _set_cell_text(row.cells[1], "（待填写）", font_size=10)
-        _set_cell_text(row.cells[2], "（待填写）", font_size=10)
-        _set_cell_text(row.cells[3], "（待填写）", font_size=10)
-        _set_cell_text(row.cells[4], "（待填写）", font_size=10)
-        _set_cell_text(row.cells[5], "（待填写）", font_size=10)
-
-    # ---- 三、评价分析 ----
-    doc.add_paragraph()
-    h3 = doc.add_paragraph()
-    _set_paragraph_text(h3, "三、评价分析", bold=True, font_size=14, font_name="黑体")
-
-    for i in range(len(course_objectives)):
-        p = doc.add_paragraph()
-        _set_paragraph_text(p, f"课程目标{i+1}达成情况分析：", bold=True, font_size=12)
-        p2 = doc.add_paragraph()
-        _set_paragraph_text(p2, "（待填写）", font_size=12)
-
-    # ---- 四、持续改进措施 ----
-    doc.add_paragraph()
-    h4 = doc.add_paragraph()
-    _set_paragraph_text(h4, "四、持续改进措施", bold=True, font_size=14, font_name="黑体")
-
-    p = doc.add_paragraph()
-    _set_paragraph_text(p, "（待填写）", font_size=12)
-
-    # ---- 签名区 ----
-    doc.add_paragraph()
-    doc.add_paragraph()
-    sign_table = doc.add_table(rows=2, cols=3, style="Table Grid")
-    sign_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    _set_cell_text(sign_table.rows[0].cells[0], "评价责任人", bold=True, font_size=10.5)
-    _set_cell_text(sign_table.rows[0].cells[1], "", font_size=10.5)
-    _set_cell_text(sign_table.rows[0].cells[2], "日期：", font_size=10.5)
-    _set_cell_text(sign_table.rows[1].cells[0], "系（教研室）主任", bold=True, font_size=10.5)
-    _set_cell_text(sign_table.rows[1].cells[1], "", font_size=10.5)
-    _set_cell_text(sign_table.rows[1].cells[2], "日期：", font_size=10.5)
-
+    # 加载模板文档
+    doc = Document(_TEMPLATE_PATH)
+    
+    if len(doc.tables) < 2:
+        raise ValueError("模板文件格式异常：未找到预期的2个表格")
+    
+    # 填充表格0：基本信息
+    _fill_table0(doc.tables[0], teaching_class, evaluator, participants, course_objectives)
+    
+    # 填充表格1：评价相关
+    _fill_table1(doc.tables[1], course_objectives)
+    
     # 输出到字节流
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -197,7 +225,8 @@ def generate_edu_report(
 ) -> str:
     """
     生成《专业课程目标达成度评价报告》Word文档。
-    将收集到的信息渲染为标准格式报告，并上传到对象存储，返回可下载链接。
+    基于岭南师范学院标准模板，将收集到的信息填入模板，严格保持模板格式不变，
+    并上传到对象存储，返回可下载链接。
 
     Args:
         teaching_class: 教学班级名称，如"软件工程24级1班"
@@ -216,8 +245,8 @@ def generate_edu_report(
     try:
         course_objectives = [course_objective_1, course_objective_2, course_objective_3, course_objective_4]
 
-        # 1. 生成 Word 文档
-        logger.info("开始生成评价报告Word文档...")
+        # 1. 基于模板生成 Word 文档
+        logger.info("基于模板生成评价报告Word文档...")
         doc_bytes = _build_report_docx(
             teaching_class=teaching_class,
             evaluator=evaluator,
