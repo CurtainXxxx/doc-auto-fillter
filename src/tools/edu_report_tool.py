@@ -356,22 +356,12 @@ def generate_edu_report(report_data: str) -> str:
     ctx = request_context.get() or new_context(method="generate_edu_report")
 
     try:
-        # 尝试直接解析
-        try:
-            data = json.loads(report_data)
-        except json.JSONDecodeError:
-            # 容错：尝试修复常见的JSON截断问题
-            # 1. 找到最后一个完整的 } 或 ] 闭合位置
-            # 2. 补全缺失的括号
-            repaired = report_data.rstrip()
-            open_braces = repaired.count('{') - repaired.count('}')
-            open_brackets = repaired.count('[') - repaired.count(']')
-            if open_brackets > 0:
-                repaired += ']' * open_brackets
-            if open_braces > 0:
-                repaired += '}' * open_braces
-            logger.warning(f"JSON解析失败，尝试修复：补全 {open_braces} 个}} 和 {open_brackets} 个]")
-            data = json.loads(repaired)
+        data = json.loads(report_data)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "success": False,
+            "message": f"report_data JSON解析失败: {str(e)}",
+        }, ensure_ascii=False, indent=2)
 
     try:
         logger.info("基于模板生成评价报告Word文档...")
