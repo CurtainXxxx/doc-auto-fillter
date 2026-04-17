@@ -1,9 +1,15 @@
-"""高校教务评价报告生成工具 - 基于模板严格匹配格式生成Word文档
-自动识别模板中所有缺失字段，接受用户填入的完整数据。
+"""高校教务文档生成工具 - 自动识别模板 + 动态填充（简化版）
+
+核心能力:
+1. 自动解析任意Word模板，识别所有可填充字段
+2. 只填充简单字段（标签冒号后追加值）和简单行组（空白格直接填值）
+3. 复杂表格（大量合并、超多列）保持原样不填，避免格式错乱
+4. 支持多模板，通过template_name参数选择
 """
 
 import os
 import io
+import re
 import json
 import logging
 import copy
@@ -15,25 +21,27 @@ from langchain.tools import tool
 from coze_coding_dev_sdk.s3 import S3SyncStorage
 from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import new_context
+from tools.template_analyzer import analyze_template
 
 logger = logging.getLogger(__name__)
 
-# 全局 S3 客户端（懒初始化）
-_s3_storage = None
-
-# 模板文件路径
-_TEMPLATE_PATH = os.path.join(
-    os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"),
-    "assets",
-    "template.docx",
-)
-
-# OOXML 命名空间
 _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+# 模板注册表：key=模板名称, value=文件路径
+TEMPLATE_REGISTRY = {
+    "评价报告": "assets/template.docx",
+    "试卷分析": "assets/template_exam.docx",
+    "关联矩阵": "assets/template_matrix.docx",
+}
+
+# 行组复杂度阈值：列数超过此值视为复杂行组，跳过填充
+_MAX_SIMPLE_GROUP_COLS = 10
+
+# S3 客户端
+_s3_storage = None
 
 
 def _get_s3_storage() -> S3SyncStorage:
-    """获取 S3 存储单例"""
     global _s3_storage
     if _s3_storage is None:
         _s3_storage = S3SyncStorage(
@@ -46,39 +54,69 @@ def _get_s3_storage() -> S3SyncStorage:
     return _s3_storage
 
 
-# ──────────────────── 低级工具函数 ────────────────────
+def _get_template_path(template_name: str) -> str:
+    """根据名称获取模板绝对路径"""
+    rel_path = TEMPLATE_REGISTRY.get(template_name)
+    if not rel_path:
+        raise ValueError(f"未找到模板'{template_name}'，可用模板: {list(TEMPLATE_REGISTRY.keys())}")
+    return os.path.join(os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"), rel_path)
 
-def _append_text_after_run(cell, label: str, value: str):
-    """在单元格中找到包含 label 的 run，在其后插入一个同格式的 run 填入 value。"""
+
+def _get_unique_cells(row) -> list:
+    """获取行中的独立单元格"""
+    seen = set()
+    cells = []
+    for cell in row.cells:
+        cid = id(cell._element)
+        if cid not in seen:
+            seen.add(cid)
+            cells.append(cell)
+    return cells
+
+
+def _is_vmerge_continue(cell) -> bool:
+    """判断单元格是否是垂直合并延续格"""
+    tcPr = cell._element.find(f"{{{_W_NS}}}tcPr")
+    if tcPr is not None:
+        vm = tcPr.find(f"{{{_W_NS}}}vMerge")
+        if vm is not None:
+            vm_val = vm.get(f"{{{_W_NS}}}val")
+            if vm_val is None or vm_val == "continue":
+                return True
+    return False
+
+
+# ──────────────────── 填充函数 ────────────────────
+
+def _append_after_label(cell, label: str, value: str):
+    """在单元格中找到含 label 且以冒号结尾的 run，在其后追加同格式 run"""
     for para in cell.paragraphs:
         for run in para.runs:
-            if label in run.text:
+            if label in run.text and run.text.strip().endswith(('：', ':')):
                 new_run_elem = copy.deepcopy(run._element)
                 for t_elem in new_run_elem.findall(qn("w:t")):
                     t_elem.text = value
                 run._element.addnext(new_run_elem)
-                return
+                return True
+    return False
 
 
 def _set_cell_text(cell, text: str):
-    """清空单元格内容（保留第一个段落的格式），设置新文本。"""
+    """清空单元格内容，设置新文本，保留第一个段落格式"""
     if not cell.paragraphs:
         return
-    first_para = cell.paragraphs[0]
-    # 清空所有 run
     for para in cell.paragraphs:
         for run in list(para.runs):
             run._element.getparent().remove(run._element)
-    # 删除多余段落
     for para in cell.paragraphs[1:]:
         para._element.getparent().remove(para._element)
-    new_run = first_para.add_run(text)
+    new_run = cell.paragraphs[0].add_run(text)
     new_run.font.name = "FangSong_GB2312"
     new_run._element.rPr.rFonts.set(qn("w:eastAsia"), "FangSong_GB2312")
 
 
 def _add_table_row_after(table, after_row_idx: int):
-    """深拷贝模板行，清空文本后插入到指定行之后，保持所有格式。"""
+    """深拷贝模板行，清空文本后插入"""
     src_tr = table.rows[after_row_idx]._element
     new_tr = copy.deepcopy(src_tr)
     for tc in new_tr.findall(qn("w:tc")):
@@ -89,179 +127,142 @@ def _add_table_row_after(table, after_row_idx: int):
     src_tr.addnext(new_tr)
 
 
-def _set_run_in_multiline_cell(cell, line_keyword: str, value: str):
-    """在含多段落的单元格中，找到包含 line_keyword 的段落，在其 run 后追加 value。
-    用于类似 '实现途径:|评价方法:' 这样的多行单元格。
+def _fill_label_fields(doc, analysis: dict, data: dict):
+    """填充标签字段：在"标签："后追加用户值。跳过行组覆盖区域。"""
+    row_groups = analysis["row_groups"]
+
+    def _in_row_group(t_idx, r_idx):
+        for g in row_groups:
+            if g["table_idx"] == t_idx and g["start_row"] <= r_idx < g["start_row"] + g["template_row_count"]:
+                return True
+        return False
+
+    for field_info in analysis["label_fields"]:
+        label = field_info["label"]
+        value = data.get(label, "")
+        if not value:
+            continue
+
+        t_idx = field_info["table_idx"]
+        table = doc.tables[t_idx]
+        row_indices = [r for r in field_info["row_indices"] if not _in_row_group(t_idx, r)]
+
+        if not row_indices:
+            continue
+
+        if isinstance(value, list):
+            for i, row_idx in enumerate(row_indices):
+                if i < len(value):
+                    unique = _get_unique_cells(table.rows[row_idx])
+                    if field_info["col_idx"] < len(unique):
+                        _append_after_label(unique[field_info["col_idx"]], label, value[i])
+        else:
+            row_idx = row_indices[0]
+            unique = _get_unique_cells(table.rows[row_idx])
+            if field_info["col_idx"] < len(unique):
+                _append_after_label(unique[field_info["col_idx"]], label, value)
+
+
+def _fill_simple_row_groups(doc, analysis: dict, data: dict):
+    """填充简单行组：只处理列数<=阈值且无复杂合并的行组。
+    策略：只填空白独立单元格，跳过含标签和vMerge的格。
     """
-    for para in cell.paragraphs:
-        full_text = "".join(r.text for r in para.runs if r.text)
-        if line_keyword in full_text:
-            # 在此段落最后一个 run 后追加
-            new_run = para.add_run(value)
-            # 复制同段落的字体
-            for r in para.runs:
-                if r.font.name:
-                    new_run.font.name = r.font.name
-                    if r._element.rPr is not None and r._element.rPr.rFonts is not None:
-                        new_run._element.rPr.rFonts.set(qn("w:eastAsia"),
-                            r._element.rPr.rFonts.get(qn("w:eastAsia"), "FangSong_GB2312"))
-                    break
-            return
+    for group_info in analysis["row_groups"]:
+        group_id = group_info["group_id"]
+        col_count = len(group_info["column_labels"])
 
+        # 跳过复杂行组
+        if col_count > _MAX_SIMPLE_GROUP_COLS:
+            logger.info(f"跳过复杂行组 {group_id} ({col_count}列)")
+            continue
 
-# ──────────────────── 表格0 填充 ────────────────────
+        group_data = data.get(group_id, [])
+        if not group_data:
+            continue
 
-def _fill_table0(table, data: dict):
-    """填充表格0：基本信息 + 课程目标与毕业要求的对应关系
+        t_idx = group_info["table_idx"]
+        table = doc.tables[t_idx]
+        start_row = group_info["start_row"]
+        template_count = group_info["template_row_count"]
 
-    模板结构（7列）:
-      行0: 课程名称(gs=2) | 开课时间(gs=3) | 考试类别/平时/期末 | 参评人数
-      行1: 教学班级(gs=3) | 评价责任人(gs=3) | 参与人
-      行2: 一、课程目标与毕业要求的对应关系 (gs=7)
-      行3: 毕业要求 | 毕业要求指标点(gs=3) | 课程目标(gs=3)   ← 表头
-      行4-6: 毕业要求 | 毕业要求指标点(gs=3) | 课程目标(gs=3) ← 3行空白数据行
-    """
-    # ── 行0: 课程名称 / 开课时间 / 参评人数 ──
-    _append_text_after_run(table.rows[0].cells[0], "课程名称:", data.get("course_name", ""))
-    _append_text_after_run(table.rows[0].cells[2], "开课时间:", data.get("course_time", ""))
-    _append_text_after_run(table.rows[0].cells[6], "参评人数：", data.get("eval_headcount", ""))
+        # 扩展行
+        needed = len(group_data)
+        if needed > template_count:
+            last = start_row + template_count - 1
+            for i in range(needed - template_count):
+                _add_table_row_after(table, last + i)
 
-    # ── 行1: 教学班级 / 评价责任人 / 参与人 ──
-    _append_text_after_run(table.rows[1].cells[0], "教学班级：", data.get("teaching_class", ""))
-    _append_text_after_run(table.rows[1].cells[3], "评价责任人:", data.get("evaluator", ""))
-    _append_text_after_run(table.rows[1].cells[6], "参与人：", data.get("participants", ""))
-
-    # ── 行4+: 课程目标数据行 ──
-    objectives = data.get("objectives", [])
-    template_data_rows = 3  # 模板行4,5,6
-
-    # 不足则补行
-    if len(objectives) > template_data_rows:
-        for _ in range(len(objectives) - template_data_rows):
-            _add_table_row_after(table, len(table.rows) - 1)
-
-    for i, obj in enumerate(objectives):
-        row_idx = 4 + i
-        if row_idx >= len(table.rows):
-            break
-        row = table.rows[row_idx]
-        # 列0: 毕业要求
-        _set_cell_text(row.cells[0], obj.get("graduation_requirement", ""))
-        # 列1-3(合并): 毕业要求指标点
-        _set_cell_text(row.cells[1], obj.get("indicator", ""))
-        # 列4-6(合并): 课程目标
-        _set_cell_text(row.cells[4], f"课程目标{i+1}：{obj.get('objective', '')}")
-
-
-# ──────────────────── 表格1 填充 ────────────────────
-
-def _fill_table1(table, data: dict):
-    """填充表格1：评价依据 + 考核分布 + 评价结果 + 总结改进
-
-    模板结构（35列, 34行）:
-      行0:  二、课程目标评价依据 (gs=35)
-      行1:  考核环节 | 课程目标1(gs=8) | 课程目标2(gs=9) | 课程目标3(gs=8) | 课程目标4(gs=5)
-      行2-6: 评价依据数据行(5行)
-      行7:  三、课程目标期末考核分布 (gs=35)
-      行8-15: 考核分布表
-      行16: 四、课程教学质量评价结果 (gs=35)
-      行17: 表头
-      行18-29: 4个目标×3考核方式(期末/平时/实验)
-      行30: 课程目标达成评价值
-      行31: 课程目标达成分布
-      行32: 五、课程总结与改进措施 (gs=35)
-      行33: 课程总结 + 改进措施 (gs=35)
-    """
-    objectives = data.get("objectives", [])
-
-    # ── 行2-6: 评价依据数据 ──
-    eval_basis = data.get("evaluation_basis", [])
-    for i, row_data in enumerate(eval_basis[:5]):
-        row_idx = 2 + i
-        if row_idx > 6:
-            break
-        row = table.rows[row_idx]
-        # 5个逻辑列: 考核环节 | 课程目标1 | 课程目标2 | 课程目标3 | 课程目标4
-        seen = set()
-        logical_col = 0
-        for cell in row.cells:
-            cid = id(cell._element)
-            if cid in seen:
-                continue
-            seen.add(cid)
-            val = row_data[logical_col] if logical_col < len(row_data) else ""
-            _set_cell_text(cell, val)
-            logical_col += 1
-
-    # ── 行18-29: 教学质量评价结果 ──
-    quality_results = data.get("quality_results", [])
-    for i, obj_result in enumerate(quality_results[:4]):
-        base_row = 18 + i * 3
-        # 课程目标标签
-        if base_row < len(table.rows):
-            _set_cell_text(table.rows[base_row].cells[0], f"课程目标{i+1}")
-        # 3行: 期末考试 / 平时成绩 / 实验成绩
-        for j, sub_result in enumerate(obj_result.get("details", [])[:3]):
-            row_idx = base_row + j
-            if row_idx >= len(table.rows):
+        # 填入数据：遍历独立单元格，空白格按顺序填值
+        for row_offset, row_data in enumerate(group_data):
+            if row_offset >= needed:
                 break
-            row = table.rows[row_idx]
-            # 实现途径、评价方法
-            _set_run_in_multiline_cell(row.cells[1], "实现途径:", sub_result.get("approach", ""))
-            _set_run_in_multiline_cell(row.cells[1], "评价方法:", sub_result.get("method", ""))
-            # 目标分值(期末考试/平时成绩/实验成绩下的子列)
-            target_score = sub_result.get("target_score", "")
-            actual_score = sub_result.get("actual_score", "")
-            achievement = sub_result.get("achievement", "")
-            # 这些列需要跳到正确的逻辑列位置
-            # 行18结构: 课程目标(gs=3) | 实现途径(gs=17) | 目标分值-期末考试(gs=3)+空(gs=4) | 实际平均分(gs=5) | 达成评价值(gs=3)
-            # 目标分值区分为"期末考试"标签和数值
-            _append_text_after_run(row.cells[2], "期末考试", target_score) if j == 0 and "期末" in row.cells[2].text else None
-            # 简化处理：直接在对应列追加
-            if target_score:
-                _append_text_after_run(row.cells[2], row.cells[2].paragraphs[0].runs[0].text if row.cells[2].paragraphs[0].runs else "", target_score)
-            if actual_score:
-                seen2 = set()
-                for cell in row.cells:
-                    cid = id(cell._element)
-                    if cid in seen2:
-                        continue
-                    seen2.add(cid)
-                    if "实际平均分" in cell.text or actual_score:
-                        _append_text_after_run(cell, cell.text.split("\n")[-1] if cell.text else "", actual_score)
-                        break
+            actual_row = start_row + row_offset
+            if actual_row >= len(table.rows):
+                break
+            unique = _get_unique_cells(table.rows[actual_row])
 
-    # ── 行30: 课程目标达成评价值 ──
-    achievement_values = data.get("achievement_values", "")
-    if achievement_values:
-        _set_cell_text(table.rows[30].cells[1], achievement_values)
+            data_idx = 0
+            for cell in unique:
+                if data_idx >= len(row_data):
+                    break
 
-    # ── 行33: 课程总结 + 改进措施 ──
-    course_summary = data.get("course_summary", "")
-    improvement = data.get("improvement", "")
-    cell33 = table.rows[33].cells[0]
-    for para in cell33.paragraphs:
-        full_text = "".join(r.text for r in para.runs if r.text)
-        if "课程总结" in full_text and course_summary:
-            # 在该段落后追加内容
-            new_run = para.add_run(course_summary)
-            new_run.font.name = "FangSong_GB2312"
-            new_run._element.rPr.rFonts.set(qn("w:eastAsia"), "FangSong_GB2312")
-        if "改进措施" in full_text and improvement:
-            new_run = para.add_run(improvement)
-            new_run.font.name = "FangSong_GB2312"
-            new_run._element.rPr.rFonts.set(qn("w:eastAsia"), "FangSong_GB2312")
+                # 跳过vMerge=continue的格
+                if _is_vmerge_continue(cell):
+                    continue
+
+                text = cell.text.strip().replace('\r', '')
+                if not text:
+                    # 空白格 → 填值
+                    _set_cell_text(cell, str(row_data[data_idx]))
+                    data_idx += 1
+                else:
+                    # 含标签格：检查"标签："模式
+                    lines = [l.strip() for l in text.split('\n') if l.strip()]
+                    for line in lines:
+                        m = re.match(r'^(.+?)\s*[：:]\s*(.*)', line)
+                        if m and not m.group(2).strip():
+                            # "标签："后为空 → 追加值
+                            if data_idx < len(row_data) and row_data[data_idx]:
+                                _append_after_label(cell, m.group(1).strip(), str(row_data[data_idx]))
+                            data_idx += 1
+                        elif m and m.group(2).strip():
+                            # "标签：已有值" → 跳过
+                            data_idx += 1
+                        # 无冒号固定标签 → 不消费数据
 
 
-def _build_report_docx(data: dict) -> bytes:
-    """基于模板文件生成评价报告，确保格式与模板完全一致。"""
-    doc = Document(_TEMPLATE_PATH)
+def _fill_summary_section(doc, analysis: dict, data: dict):
+    """填充课程总结/改进措施等大段文本字段。
+    这些字段通常在表格末尾的大合并单元格中，标签后是空行区域。
+    """
+    for field_info in analysis["label_fields"]:
+        label = field_info["label"]
+        if label not in ("课程总结", "改进措施"):
+            continue
+        value = data.get(label, "")
+        if not value:
+            continue
 
-    if len(doc.tables) < 2:
-        raise ValueError("模板文件格式异常：未找到预期的2个表格")
+        t_idx = field_info["table_idx"]
+        table = doc.tables[t_idx]
+        for row_idx in field_info["row_indices"]:
+            if row_idx >= len(table.rows):
+                continue
+            unique = _get_unique_cells(table.rows[row_idx])
+            for cell in unique:
+                if label in cell.text:
+                    _append_after_label(cell, label, value)
+                    break
 
-    _fill_table0(doc.tables[0], data)
-    _fill_table1(doc.tables[1], data)
+
+def _build_report_docx(template_path: str, data: dict) -> bytes:
+    """基于模板 + 解析结果 + 用户数据，动态生成文档"""
+    analysis = analyze_template(template_path)
+    doc = Document(template_path)
+
+    _fill_label_fields(doc, analysis, data)
+    _fill_simple_row_groups(doc, analysis, data)
+    _fill_summary_section(doc, analysis, data)
 
     buffer = io.BytesIO()
     doc.save(buffer)
@@ -270,85 +271,81 @@ def _build_report_docx(data: dict) -> bytes:
 
 # ──────────────────── 工具定义 ────────────────────
 
-# 模板中所有需要用户填写的字段，用于描述工具参数
-_TEMPLATE_FIELDS_DESCRIPTION = """
-模板包含以下需要填写的字段（按表格区域划分）：
-
-【表格0 - 基本信息】
-- course_name: 课程名称
-- course_time: 开课时间
-- eval_headcount: 参评人数
-- teaching_class: 教学班级
-- evaluator: 评价责任人
-- participants: 参与人
-
-【表格0 - 课程目标与毕业要求】(每个课程目标包含)
-- objectives: 数组，每个元素包含:
-  - objective: 课程目标内容
-  - graduation_requirement: 对应的毕业要求
-  - indicator: 毕业要求指标点
-
-【表格1 - 课程目标评价依据】
-- evaluation_basis: 数组(最多5行)，每行为5个字符串 [考核环节, 目标1, 目标2, 目标3, 目标4]
-
-【表格1 - 教学质量评价结果】
-- quality_results: 数组(4个目标)，每个元素包含:
-  - details: 数组(3项: 期末考试/平时成绩/实验成绩)，每项包含:
-    - approach: 实现途径
-    - method: 评价方法
-    - target_score: 目标分值
-    - actual_score: 实际平均分
-    - achievement: 达成评价值
-
-【表格1 - 总结改进】
-- achievement_values: 课程目标达成评价值（实际值/目标期望值）
-- course_summary: 课程总结
-- improvement: 改进措施
-"""
+@tool
+def list_templates() -> str:
+    """列出所有可用的报告模板。当用户开始对话时调用此工具，展示可选模板列表。"""
+    ctx = request_context.get() or new_context(method="list_templates")
+    result = {
+        "success": True,
+        "templates": [
+            {"name": name, "file": path}
+            for name, path in TEMPLATE_REGISTRY.items()
+        ],
+    }
+    return json.dumps(result, ensure_ascii=False, indent=2)
 
 
 @tool
-def generate_edu_report(report_data: str) -> str:
+def analyze_report_template(template_name: str) -> str:
+    """解析指定模板，自动识别所有需要填写的字段，返回字段清单和收集计划。
+    在开始收集用户信息前必须先调用此工具。
+
+    Args:
+        template_name: 模板名称，从list_templates返回的名称中选择
+
+    Returns:
+        包含字段清单和收集计划的JSON字符串
     """
-    生成《专业课程目标达成度评价报告》Word文档。
-    基于岭南师范学院标准模板，将用户提供的完整数据填入模板所有字段，严格保持模板格式不变，
-    并上传到对象存储，返回可下载链接。
+    ctx = request_context.get() or new_context(method="analyze_report_template")
 
-    参数 report_data 是一个 JSON 字符串，包含以下字段:
-    {
-      "course_name": "课程名称",
-      "course_time": "开课时间，如2023-2024-2",
-      "eval_headcount": "参评人数",
-      "teaching_class": "教学班级",
-      "evaluator": "评价责任人",
-      "participants": "参与人，多人用逗号隔开",
-      "objectives": [
-        {
-          "objective": "课程目标1内容",
-          "graduation_requirement": "对应的毕业要求",
-          "indicator": "毕业要求指标点"
-        },
-        ... 共4个
-      ],
-      "evaluation_basis": [
-        ["考核环节名", "目标1权重", "目标2权重", "目标3权重", "目标4权重"],
-        ... 最多5行
-      ],
-      "quality_results": [
-        {
-          "details": [
-            {"approach":"实现途径","method":"评价方法","target_score":"目标分值","actual_score":"实际平均分","achievement":"达成评价值"},
-            ... 3项: 期末考试/平时成绩/实验成绩
-          ]
-        },
-        ... 共4个目标
-      ],
-      "achievement_values": "课程目标达成评价值",
-      "course_summary": "课程总结内容",
-      "improvement": "改进措施内容"
-    }
+    try:
+        template_path = _get_template_path(template_name)
+        result = analyze_template(template_path)
 
-    所有字段均可为空字符串，工具会保留模板原样。
+        # 区分简单行组和复杂行组
+        simple_groups = []
+        complex_groups = []
+        for g in result["row_groups"]:
+            if len(g["column_labels"]) <= _MAX_SIMPLE_GROUP_COLS:
+                simple_groups.append(g)
+            else:
+                complex_groups.append(g)
+
+        output = {
+            "success": True,
+            "template_name": template_name,
+            "total_label_fields": result["summary"]["total_unique_labels"],
+            "field_labels": [f["label"] for f in result["label_fields"]],
+            "repeat_labels": {f["label"]: f["repeat_count"] for f in result["label_fields"] if f["repeat_count"] > 1},
+            "simple_row_groups": [
+                {
+                    "group_id": g["group_id"],
+                    "template_row_count": g["template_row_count"],
+                    "column_labels": g["column_labels"],
+                }
+                for g in simple_groups
+            ],
+            "skipped_complex_groups": len(complex_groups),
+            "collection_plan": result["summary"]["collection_plan"],
+        }
+
+        return json.dumps(output, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        logger.error(f"模板解析失败: {e}")
+        return json.dumps({"success": False, "message": f"模板解析失败: {str(e)}"}, ensure_ascii=False, indent=2)
+
+
+@tool
+def generate_edu_report(template_name: str, report_data: str) -> str:
+    """生成教务报告Word文档。自动解析模板，将用户数据填入对应字段，保持模板格式不变，
+    上传到对象存储，返回下载链接。
+
+    Args:
+        template_name: 模板名称（与analyze_report_template使用相同名称）
+        report_data: JSON字符串，key为字段标签名或行组group_id，value为填写内容。
+            标签字段: key=标签名, value=字符串; 重复标签: value=数组。
+            行组字段: key=group_id, value=二维数组 [[行1列1,...],...]。
 
     Returns:
         包含文档下载链接的JSON字符串
@@ -358,42 +355,32 @@ def generate_edu_report(report_data: str) -> str:
     try:
         data = json.loads(report_data)
     except json.JSONDecodeError as e:
-        return json.dumps({
-            "success": False,
-            "message": f"report_data JSON解析失败: {str(e)}",
-        }, ensure_ascii=False, indent=2)
+        return json.dumps({"success": False, "message": f"JSON解析失败: {str(e)}"}, ensure_ascii=False, indent=2)
 
     try:
-        logger.info("基于模板生成评价报告Word文档...")
-        doc_bytes = _build_report_docx(data)
-        logger.info(f"Word文档生成完成，大小: {len(doc_bytes)} bytes")
+        template_path = _get_template_path(template_name)
+        logger.info(f"基于模板'{template_name}'生成文档...")
+        doc_bytes = _build_report_docx(template_path, data)
+        logger.info(f"文档生成完成，大小: {len(doc_bytes)} bytes")
 
-        # 上传到对象存储
         storage = _get_s3_storage()
         timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        file_name = f"edu_report/course_evaluation_report_{timestamp}.docx"
+        file_name = f"edu_report/{template_name}_{timestamp}.docx"
 
         file_key = storage.upload_file(
             file_content=doc_bytes,
             file_name=file_name,
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
-        logger.info(f"文档已上传，key: {file_key}")
-
-        # 生成签名下载链接（有效期24小时）
         download_url = storage.generate_presigned_url(key=file_key, expire_time=86400)
-        logger.info("签名URL生成完成")
 
         return json.dumps({
             "success": True,
-            "message": "评价报告已成功生成并上传",
+            "message": "报告已成功生成并上传",
             "file_name": file_name,
             "download_url": download_url,
         }, ensure_ascii=False, indent=2)
 
     except Exception as e:
-        logger.error(f"生成评价报告失败: {e}")
-        return json.dumps({
-            "success": False,
-            "message": f"生成评价报告失败: {str(e)}",
-        }, ensure_ascii=False, indent=2)
+        logger.error(f"生成报告失败: {e}")
+        return json.dumps({"success": False, "message": f"生成报告失败: {str(e)}"}, ensure_ascii=False, indent=2)
