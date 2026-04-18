@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import os
 import threading
 import traceback
 import logging
@@ -10,6 +11,8 @@ import uvicorn
 import time
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
@@ -235,6 +238,21 @@ class GraphService:
 
 service = GraphService()
 app = FastAPI()
+
+# CORS 中间件 - 允许前端页面访问 API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 挂载前端静态文件
+_web_dir = os.path.join(os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"), "web")
+if os.path.isdir(_web_dir):
+    app.mount("/web", StaticFiles(directory=_web_dir, html=True), name="web")
+    logger.info(f"Frontend mounted at /web from {_web_dir}")
 
 # OpenAI 兼容接口处理器
 openai_handler = OpenAIChatHandler(service)

@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>教务文档助手</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --primary: #4F6EF7;
+  --primary-light: #6B85F9;
+  --primary-bg: #EEF1FE;
+  --bg: #F5F6FA;
+  --white: #FFFFFF;
+  --border: #E4E7ED;
+  --text: #303133;
+  --text-secondary: #909399;
+  --success: #67C23A;
+  --shadow: 0 2px 12px rgba(0,0,0,0.06);
+}
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
+
+/* ── 整体布局 ── */
+.app { display: flex; height: 100vh; overflow: hidden; }
+
+/* ── 左侧聊天区 ── */
+.chat-panel {
+  width: 420px; min-width: 360px; display: flex; flex-direction: column;
+  background: var(--white); border-right: 1px solid var(--border);
+}
+.chat-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px;
+}
+.chat-header .avatar {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
+  display: flex; align-items: center; justify-content: center; color: #fff; font-size: 20px;
+}
+.chat-header .info h2 { font-size: 16px; font-weight: 600; }
+.chat-header .info p { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+.chat-messages {
+  flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;
+}
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
+
+.msg { display: flex; gap: 10px; max-width: 100%; }
+.msg.user { flex-direction: row-reverse; }
+.msg .bubble {
+  max-width: 85%; padding: 12px 16px; border-radius: 12px; font-size: 14px;
+  line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+}
+.msg.assistant .bubble { background: var(--primary-bg); color: var(--text); border-top-left-radius: 4px; }
+.msg.user .bubble { background: var(--primary); color: #fff; border-top-right-radius: 4px; }
+
+.msg .icon {
+  width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 16px;
+}
+.msg.assistant .icon { background: linear-gradient(135deg, var(--primary), var(--primary-light)); color: #fff; }
+.msg.user .icon { background: #E8EAED; color: var(--text-secondary); }
+
+/* 打字指示器 */
+.typing-dots { display: inline-flex; gap: 4px; padding: 4px 0; }
+.typing-dots span { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); animation: bounce 1.4s infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+/* 下载链接样式 */
+.download-link {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 8px 14px;
+  background: var(--primary); color: #fff !important; border-radius: 8px; text-decoration: none;
+  font-size: 13px; font-weight: 500; transition: background 0.2s;
+}
+.download-link:hover { background: var(--primary-light); }
+
+/* 输入区 */
+.chat-input {
+  padding: 16px; border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-end;
+}
+.chat-input textarea {
+  flex: 1; resize: none; border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 14px; font-size: 14px; font-family: inherit; line-height: 1.5;
+  max-height: 120px; outline: none; transition: border-color 0.2s;
+}
+.chat-input textarea:focus { border-color: var(--primary); }
+.chat-input button {
+  width: 42px; height: 42px; border: none; border-radius: 10px; cursor: pointer;
+  background: var(--primary); color: #fff; font-size: 18px; display: flex;
+  align-items: center; justify-content: center; transition: background 0.2s; flex-shrink: 0;
+}
+.chat-input button:hover { background: var(--primary-light); }
+.chat-input button:disabled { background: #C0C4CC; cursor: not-allowed; }
+
+/* ── 右侧文档预览区 ── */
+.preview-panel {
+  flex: 1; display: flex; flex-direction: column; background: var(--bg);
+}
+.preview-header {
+  padding: 14px 24px; background: var(--white); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.preview-header .title-area { display: flex; align-items: center; gap: 10px; }
+.preview-header .title-area h3 { font-size: 15px; font-weight: 600; }
+.preview-header .actions { display: flex; gap: 8px; }
+.preview-header .actions button {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--white); font-size: 13px; cursor: pointer; transition: all 0.2s;
+  display: flex; align-items: center; gap: 4px;
+}
+.preview-header .actions button:hover { border-color: var(--primary); color: var(--primary); }
+.preview-header .actions button.primary {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+.preview-header .actions button.primary:hover { background: var(--primary-light); }
+
+.preview-body {
+  flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
+}
+
+/* 空状态 */
+.empty-state { text-align: center; color: var(--text-secondary); }
+.empty-state .icon-big { font-size: 64px; margin-bottom: 16px; opacity: 0.3; }
+.empty-state h4 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
+.empty-state p { font-size: 13px; line-height: 1.6; }
+
+/* 文档预览卡片 */
+.doc-preview-card {
+  background: var(--white); border-radius: 12px; box-shadow: var(--shadow);
+  width: 100%; max-width: 700px; overflow: hidden;
+}
+.doc-preview-card .doc-title-bar {
+  padding: 12px 20px; background: #F8F9FB; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary);
+}
+.doc-preview-card .doc-title-bar .dot { width: 8px; height: 8px; border-radius: 50%; }
+.doc-preview-card .doc-title-bar .dot.red { background: #FF5F56; }
+.doc-preview-card .doc-title-bar .dot.yellow { background: #FFBD2E; }
+.doc-preview-card .doc-title-bar .dot.green { background: #27C93F; }
+
+.doc-preview-card .doc-content {
+  padding: 30px 40px; min-height: 400px; font-size: 14px; line-height: 2;
+  color: var(--text);
+}
+.doc-preview-card .doc-content .field-row {
+  display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px dashed #eee;
+}
+.doc-preview-card .doc-content .field-row .label { color: var(--text-secondary); white-space: nowrap; min-width: 80px; }
+.doc-preview-card .doc-content .field-row .value { color: var(--text); flex: 1; }
+
+.doc-preview-card .doc-content .section-title {
+  font-size: 15px; font-weight: 600; margin: 16px 0 8px; padding-bottom: 6px;
+  border-bottom: 2px solid var(--primary);
+}
+
+/* 状态步骤条 */
+.steps-bar {
+  display: flex; gap: 0; margin-bottom: 20px;
+}
+.steps-bar .step {
+  flex: 1; text-align: center; padding: 8px 4px; font-size: 12px;
+  color: var(--text-secondary); position: relative;
+}
+.steps-bar .step::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+  background: var(--border); border-radius: 2px;
+}
+.steps-bar .step.active { color: var(--primary); font-weight: 600; }
+.steps-bar .step.active::after { background: var(--primary); }
+.steps-bar .step.done { color: var(--success); }
+.steps-bar .step.done::after { background: var(--success); }
+
+/* 生成进度 */
+.generating {
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+}
+.generating .spinner {
+  width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--primary);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.generating p { font-size: 14px; color: var(--text-secondary); }
+
+/* 响应式 */
+@media (max-width: 900px) {
+  .app { flex-direction: column; }
+  .chat-panel { width: 100%; height: 50vh; min-width: auto; }
+  .preview-panel { height: 50vh; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- 左侧聊天区 -->
+  <div class="chat-panel">
+    <div class="chat-header">
+      <div class="avatar">🎓</div>
+      <div class="info">
+        <h2>教务文档助手</h2>
+        <p>高校教务办公数字员工 · 在线</p>
+      </div>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+      <!-- 消息会动态插入 -->
+    </div>
+    <div class="chat-input">
+      <textarea id="userInput" rows="1" placeholder="请输入信息..." onkeydown="handleKeydown(event)"></textarea>
+      <button id="sendBtn" onclick="sendMessage()">➤</button>
+    </div>
+  </div>
+
+  <!-- 右侧文档预览区 -->
+  <div class="preview-panel">
+    <div class="preview-header">
+      <div class="title-area">
+        <h3 id="previewTitle">📄 文档预览</h3>
+      </div>
+      <div class="actions" id="previewActions" style="display:none;">
+        <button onclick="downloadDoc()">⬇ 下载文档</button>
+        <button class="primary" onclick="window.open(currentDownloadUrl)">打开链接</button>
+      </div>
+    </div>
+    <div class="preview-body" id="previewBody">
+      <div class="empty-state">
+        <div class="icon-big">📋</div>
+        <h4>文档预览区</h4>
+        <p>选择模板并填写信息后<br>生成的文档将在此展示</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── 状态 ──
+let sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
+let isStreaming = false;
+let currentDownloadUrl = '';
+let collectedFields = {};   // 收集到的字段
+let currentTemplate = '';   // 当前选择的模板
+let currentStep = 0;       // 当前步骤 0=未开始 1=选模板 2=收集中 3=核对 4=生成中 5=完成
+const steps = ['选择模板', '识别字段', '信息收集', '核对确认', '生成文档'];
+
+// ── API ──
+const API_URL = '/v1/chat/completions';
+
+// ── 发送消息 ──
+async function sendMessage() {
+  const input = document.getElementById('userInput');
+  const text = input.value.trim();
+  if (!text || isStreaming) return;
+
+  input.value = '';
+  input.style.height = 'auto';
+  appendMessage('user', text);
+  await callAgent(text);
+}
+
+function handleKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  // 自动调高
+  const ta = e.target;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+}
+
+// ── 添加消息气泡 ──
+function appendMessage(role, content) {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  const icon = role === 'assistant' ? '🎓' : '👤';
+  div.innerHTML = `
+    <div class="icon">${icon}</div>
+    <div class="bubble">${escapeHtml(content)}</div>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+// ── 创建流式消息气泡 ──
+function createStreamingMessage() {
+  const container = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+  div.innerHTML = `
+    <div class="icon">🎓</div>
+    <div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+// ── 调用 Agent ──
+async function callAgent(userText) {
+  isStreaming = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  const msgDiv = createStreamingMessage();
+  const bubble = msgDiv.querySelector('.bubble');
+
+  try {
+    const resp = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'agent',
+        messages: [{ role: 'user', content: userText }],
+        stream: true,
+        session_id: sessionId,
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // 保留未完成的行
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') break;
+
+        try {
+          const json = JSON.parse(data);
+          const delta = json.choices?.[0]?.delta;
+          if (delta?.content) {
+            fullText += delta.content;
+            bubble.innerHTML = renderMarkdown(fullText);
+            document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+          }
+        } catch (e) { /* skip bad json */ }
+      }
+    }
+
+    // 处理完成后的逻辑
+    postProcessResponse(fullText);
+
+  } catch (err) {
+    bubble.innerHTML = `<span style="color:#F56C6C;">⚠ 请求失败: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    isStreaming = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+// ── 响应后处理：提取下载链接、更新步骤、更新预览 ──
+function postProcessResponse(text) {
+  // 检测下载链接
+  const urlMatch = text.match(/https?:\/\/[^\s"<>]+\.docx[^\s"<>]*/);
+  if (urlMatch) {
+    currentDownloadUrl = urlMatch[0];
+    currentStep = 5;
+    updatePreview('done');
+    document.getElementById('previewActions').style.display = 'flex';
+  }
+
+  // 检测模板选择阶段
+  if (text.includes('评价报告') && (text.includes('试卷分析') || text.includes('关联矩阵'))) {
+    currentStep = 1;
+    updatePreview('template-select');
+  }
+
+  // 检测字段收集阶段
+  if (text.includes('请填写') || text.includes('请提供')) {
+    if (currentStep < 2) currentStep = 2;
+    updatePreview('collecting');
+
+    // 尝试提取字段名
+    const fieldMatch = text.match(/(?:请填写|请提供)([^，。,\n]+)/);
+    if (fieldMatch) {
+      const fieldName = fieldMatch[1].trim();
+      updateStepsBar();
+    }
+  }
+
+  // 检测核对阶段
+  if (text.includes('核对') || text.includes('确认')) {
+    currentStep = 3;
+    updatePreview('confirm');
+  }
+
+  // 检测生成阶段
+  if (text.includes('正在') && text.includes('生成')) {
+    currentStep = 4;
+    updatePreview('generating');
+  }
+
+  updateStepsBar();
+}
+
+// ── 简易 Markdown 渲染 ──
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  // 下载链接
+  html = html.replace(/(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
+    '<a class="download-link" href="$1" target="_blank">📥 下载文档</a>');
+  // 粗体
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // 列表项
+  html = html.replace(/^- (.+)$/gm, '<div style="padding-left:12px;">• $1</div>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px;">$1</div>');
+  // 换行
+  html = html.replace(/\n/g, '<br>');
+  return html;
+}
+
+// ── 更新步骤条 ──
+function updateStepsBar() {
+  const bar = document.getElementById('stepsBar');
+  if (!bar) return;
+  const items = bar.querySelectorAll('.step');
+  items.forEach((el, i) => {
+    el.className = 'step';
+    if (i < currentStep) el.classList.add('done');
+    else if (i === currentStep) el.classList.add('active');
+  });
+}
+
+// ── 更新右侧预览 ──
+function updatePreview(state) {
+  const body = document.getElementById('previewBody');
+  const title = document.getElementById('previewTitle');
+
+  switch(state) {
+    case 'template-select':
+      title.textContent = '📄 选择模板';
+      body.innerHTML = `
+        <div class="doc-preview-card">
+          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 可用模板</div>
+          <div class="doc-content">
+            <div class="section-title">📂 可选教务文档模板</div>
+            <div class="field-row"><div class="label">1️⃣ 评价报告</div><div class="value">专业课程目标达成度评价报告</div></div>
+            <div class="field-row"><div class="label">2️⃣ 试卷分析</div><div class="value">试卷分析表（考勤+分数分布）</div></div>
+            <div class="field-row"><div class="label">3️⃣ 关联矩阵</div><div class="value">考题与课程目标关联矩阵</div></div>
+            <p style="margin-top:16px;color:var(--text-secondary);font-size:13px;">💡 请在左侧聊天区回复模板编号或名称</p>
+          </div>
+        </div>`;
+      break;
+
+    case 'collecting':
+      title.textContent = '📝 信息收集中';
+      body.innerHTML = `
+        <div class="doc-preview-card">
+          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 填写进度</div>
+          <div class="doc-content">
+            <div class="section-title">📋 字段收集进度</div>
+            <div style="padding:20px 0;text-align:center;">
+              <div style="font-size:48px;margin-bottom:12px;">✍️</div>
+              <p style="color:var(--text-secondary);">正在分批收集信息，请在左侧逐项填写...</p>
+              <div style="margin-top:16px;background:var(--primary-bg);border-radius:8px;padding:12px 16px;text-align:left;font-size:13px;color:var(--primary);">
+                💡 每批2-3个字段，收集完毕后会展示核对清单
+              </div>
+            </div>
+          </div>
+        </div>`;
+      break;
+
+    case 'confirm':
+      title.textContent = '✅ 核对确认';
+      body.innerHTML = `
+        <div class="doc-preview-card">
+          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 核对清单</div>
+          <div class="doc-content">
+            <div class="section-title">📋 请核对填写内容</div>
+            <p style="color:var(--text-secondary);font-size:13px;line-height:1.8;">
+              机器人已展示完整核对清单，请仔细检查所有字段。<br>
+              确认无误后回复 <strong>"确认"</strong>，如有修改请直接说明。
+            </p>
+            <div style="margin-top:16px;background:#F0F9EB;border-radius:8px;padding:12px 16px;font-size:13px;color:#67C23A;">
+              ✅ 确认后将自动生成文档并上传
+            </div>
+          </div>
+        </div>`;
+      break;
+
+    case 'generating':
+      title.textContent = '⏳ 生成中...';
+      body.innerHTML = `
+        <div class="generating">
+          <div class="spinner"></div>
+          <p>正在联通自动化渲染引擎，请稍候...</p>
+        </div>`;
+      break;
+
+    case 'done':
+      title.textContent = '📄 文档已生成';
+      body.innerHTML = `
+        <div class="doc-preview-card">
+          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 生成成功</div>
+          <div class="doc-content">
+            <div style="text-align:center;padding:30px 0;">
+              <div style="font-size:56px;margin-bottom:12px;">🎉</div>
+              <h4 style="font-size:18px;margin-bottom:8px;">文档生成成功！</h4>
+              <p style="color:var(--text-secondary);font-size:13px;">格式与模板100%一致，可直接下载使用</p>
+              <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;">
+                <a href="${currentDownloadUrl}" target="_blank" class="download-link" style="font-size:14px;padding:10px 24px;">📥 下载Word文档</a>
+              </div>
+            </div>
+            <div style="margin-top:16px;padding:12px 16px;background:#F0F9EB;border-radius:8px;font-size:13px;color:#67C23A;line-height:1.8;">
+              ✅ 文档格式与模板完全一致<br>
+              ✅ 所有字段已正确填入<br>
+              ✅ 链接24小时内有效
+            </div>
+          </div>
+        </div>`;
+      break;
+  }
+}
+
+function downloadDoc() {
+  if (currentDownloadUrl) window.open(currentDownloadUrl);
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// ── 初始化：自动打招呼 ──
+window.addEventListener('load', () => {
+  // 不自动发送，等待用户输入
+  appendMessage('assistant', '您好！我是高校教务办公数字员工 🎓\n\n我可以帮您自动生成教务报告文档，格式与模板100%一致。\n\n请说"你好"开始，或直接告诉我您需要生成什么文档。');
+});
+</script>
+</body>
+</html>
