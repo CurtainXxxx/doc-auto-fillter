@@ -35,11 +35,14 @@ def _is_section_title_row(unique_cells) -> bool:
 
 
 def _is_empty_data_row(unique_cells) -> bool:
-    """判断是否是空白数据行"""
+    """判断是否是空白数据行：大部分格为空，且不含标签模式。
+    含"标签："的行属于待填标签行，不应归入纯数据行组。
+    """
     if not unique_cells:
         return True
     empty = sum(1 for c in unique_cells if not c.text.strip())
-    return empty >= len(unique_cells) * 0.5
+    label_count = sum(1 for c in unique_cells if re.search(r'[：:]', c.text.strip()))
+    return empty >= len(unique_cells) * 0.5 and label_count == 0
 
 
 def _is_header_row(unique_cells) -> bool:
