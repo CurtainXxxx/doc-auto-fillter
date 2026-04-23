@@ -2,9 +2,15 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import threading
 import traceback
 import logging
+
+# 确保 src/ 在 sys.path 中，让 coze_coding_utils 内部的 from utils.helper import graph_helper 能找到
+_src_dir = os.path.dirname(os.path.abspath(__file__))
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
 from typing import Any, Dict, Iterable, AsyncIterable, AsyncGenerator, Optional
 import cozeloop
 import uvicorn
