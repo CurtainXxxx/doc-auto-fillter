@@ -16,6 +16,8 @@
   --text: #303133;
   --text-secondary: #909399;
   --success: #67C23A;
+  --warning: #E6A23C;
+  --danger: #F56C6C;
   --shadow: 0 2px 12px rgba(0,0,0,0.06);
 }
 html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
@@ -25,11 +27,11 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
 
 /* ── 左侧聊天区 ── */
 .chat-panel {
-  width: 420px; min-width: 360px; display: flex; flex-direction: column;
+  width: 440px; min-width: 380px; display: flex; flex-direction: column;
   background: var(--white); border-right: 1px solid var(--border);
 }
 .chat-header {
-  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 12px;
 }
 .chat-header .avatar {
@@ -40,8 +42,25 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
 .chat-header .info h2 { font-size: 16px; font-weight: 600; }
 .chat-header .info p { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
+/* 步骤条 */
+.steps-bar {
+  display: flex; border-bottom: 1px solid var(--border); background: #FAFBFD;
+}
+.steps-bar .step {
+  flex: 1; text-align: center; padding: 8px 4px; font-size: 11px;
+  color: var(--text-secondary); position: relative;
+}
+.steps-bar .step::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+  background: var(--border); border-radius: 1px;
+}
+.steps-bar .step.active { color: var(--primary); font-weight: 600; }
+.steps-bar .step.active::after { background: var(--primary); }
+.steps-bar .step.done { color: var(--success); }
+.steps-bar .step.done::after { background: var(--success); }
+
 .chat-messages {
-  flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;
 }
 .chat-messages::-webkit-scrollbar { width: 4px; }
 .chat-messages::-webkit-scrollbar-thumb { background: #ddd; border-radius: 2px; }
@@ -49,15 +68,15 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
 .msg { display: flex; gap: 10px; max-width: 100%; }
 .msg.user { flex-direction: row-reverse; }
 .msg .bubble {
-  max-width: 85%; padding: 12px 16px; border-radius: 12px; font-size: 14px;
-  line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+  max-width: 88%; padding: 10px 14px; border-radius: 12px; font-size: 14px;
+  line-height: 1.7; white-space: pre-wrap; word-break: break-word;
 }
 .msg.assistant .bubble { background: var(--primary-bg); color: var(--text); border-top-left-radius: 4px; }
 .msg.user .bubble { background: var(--primary); color: #fff; border-top-right-radius: 4px; }
 
 .msg .icon {
-  width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center; font-size: 16px;
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 14px;
 }
 .msg.assistant .icon { background: linear-gradient(135deg, var(--primary), var(--primary-light)); color: #fff; }
 .msg.user .icon { background: #E8EAED; color: var(--text-secondary); }
@@ -71,124 +90,186 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
 
 /* 下载链接样式 */
 .download-link {
-  display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; padding: 8px 14px;
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 8px 14px;
   background: var(--primary); color: #fff !important; border-radius: 8px; text-decoration: none;
   font-size: 13px; font-weight: 500; transition: background 0.2s;
 }
 .download-link:hover { background: var(--primary-light); }
 
+/* 选择框样式 */
+.choice-box {
+  margin-top: 8px; padding: 8px 12px; background: var(--white); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px;
+}
+.choice-box .choice-title { font-weight: 600; margin-bottom: 6px; color: var(--primary); }
+.choice-box label {
+  display: flex; align-items: center; gap: 6px; padding: 5px 8px; cursor: pointer;
+  border-radius: 4px; transition: background 0.15s;
+}
+.choice-box label:hover { background: var(--primary-bg); }
+.choice-box input[type="radio"] { accent-color: var(--primary); }
+
+/* 文件上传卡片 */
+.file-card {
+  margin-top: 8px; padding: 10px 14px; background: #F0F9EB; border: 1px solid #E1F3D8;
+  border-radius: 8px; font-size: 13px; display: flex; align-items: center; gap: 8px;
+}
+.file-card .file-icon { font-size: 20px; }
+.file-card .file-info { flex: 1; }
+.file-card .file-name { font-weight: 500; }
+.file-card .file-size { color: var(--text-secondary); font-size: 11px; }
+
+/* ── 功能面板 ── */
+.func-panel {
+  border-top: 1px solid var(--border); background: #FAFBFD;
+}
+.func-panel .func-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 16px;
+}
+.func-btn {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--white);
+  cursor: pointer; transition: all 0.2s; font-size: 13px; font-family: inherit;
+  color: var(--text);
+}
+.func-btn:hover { border-color: var(--primary); background: var(--primary-bg); color: var(--primary); }
+.func-btn.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.func-btn .func-icon { font-size: 18px; }
+.func-btn .func-text { text-align: left; }
+.func-btn .func-text .title { font-weight: 600; font-size: 13px; }
+.func-btn .func-text .desc { font-size: 11px; opacity: 0.7; margin-top: 1px; }
+
 /* 输入区 */
 .chat-input {
-  padding: 16px; border-top: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-end;
+  padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: flex-end;
+  background: var(--white);
+}
+.chat-input .upload-btn {
+  width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--white); cursor: pointer; font-size: 16px; display: flex;
+  align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;
+  color: var(--text-secondary); position: relative; overflow: hidden;
+}
+.chat-input .upload-btn:hover { border-color: var(--primary); color: var(--primary); }
+.chat-input .upload-btn input[type="file"] {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
 }
 .chat-input textarea {
-  flex: 1; resize: none; border: 1px solid var(--border); border-radius: 10px;
-  padding: 10px 14px; font-size: 14px; font-family: inherit; line-height: 1.5;
-  max-height: 120px; outline: none; transition: border-color 0.2s;
+  flex: 1; resize: none; border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; font-size: 14px; font-family: inherit; line-height: 1.5;
+  max-height: 100px; outline: none; transition: border-color 0.2s;
 }
 .chat-input textarea:focus { border-color: var(--primary); }
-.chat-input button {
-  width: 42px; height: 42px; border: none; border-radius: 10px; cursor: pointer;
-  background: var(--primary); color: #fff; font-size: 18px; display: flex;
+.chat-input .send-btn {
+  width: 38px; height: 38px; border: none; border-radius: 8px; cursor: pointer;
+  background: var(--primary); color: #fff; font-size: 16px; display: flex;
   align-items: center; justify-content: center; transition: background 0.2s; flex-shrink: 0;
 }
-.chat-input button:hover { background: var(--primary-light); }
-.chat-input button:disabled { background: #C0C4CC; cursor: not-allowed; }
+.chat-input .send-btn:hover { background: var(--primary-light); }
+.chat-input .send-btn:disabled { background: #C0C4CC; cursor: not-allowed; }
 
 /* ── 右侧文档预览区 ── */
 .preview-panel {
-  flex: 1; display: flex; flex-direction: column; background: var(--bg);
+  flex: 1; display: flex; flex-direction: column; background: var(--bg); min-width: 0;
 }
 .preview-header {
-  padding: 14px 24px; background: var(--white); border-bottom: 1px solid var(--border);
+  padding: 12px 24px; background: var(--white); border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
 }
 .preview-header .title-area { display: flex; align-items: center; gap: 10px; }
 .preview-header .title-area h3 { font-size: 15px; font-weight: 600; }
 .preview-header .actions { display: flex; gap: 8px; }
 .preview-header .actions button {
-  padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--white); font-size: 13px; cursor: pointer; transition: all 0.2s;
+  padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--white); font-size: 12px; cursor: pointer; transition: all 0.2s;
   display: flex; align-items: center; gap: 4px;
 }
 .preview-header .actions button:hover { border-color: var(--primary); color: var(--primary); }
-.preview-header .actions button.primary {
-  background: var(--primary); color: #fff; border-color: var(--primary);
-}
+.preview-header .actions button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .preview-header .actions button.primary:hover { background: var(--primary-light); }
 
 .preview-body {
-  flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
+  flex: 1; overflow: auto; padding: 24px; display: flex; justify-content: center;
 }
+.preview-body::-webkit-scrollbar { width: 6px; }
+.preview-body::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
 
 /* 空状态 */
-.empty-state { text-align: center; color: var(--text-secondary); }
-.empty-state .icon-big { font-size: 64px; margin-bottom: 16px; opacity: 0.3; }
-.empty-state h4 { font-size: 16px; color: var(--text); margin-bottom: 8px; }
+.empty-state { text-align: center; color: var(--text-secondary); margin-top: 80px; }
+.empty-state .icon-big { font-size: 56px; margin-bottom: 12px; opacity: 0.3; }
+.empty-state h4 { font-size: 16px; color: var(--text); margin-bottom: 6px; }
 .empty-state p { font-size: 13px; line-height: 1.6; }
 
-/* 文档预览卡片 */
-.doc-preview-card {
-  background: var(--white); border-radius: 12px; box-shadow: var(--shadow);
-  width: 100%; max-width: 700px; overflow: hidden;
+/* 文档预览 - HTML渲染表格 */
+.doc-page {
+  background: var(--white); box-shadow: 0 1px 8px rgba(0,0,0,0.1);
+  width: 100%; max-width: 900px; min-height: 600px; padding: 40px 48px;
+  font-family: "FangSong", "仿宋", "SimSun", "宋体", serif; font-size: 12pt;
+  line-height: 1.8; color: #000;
 }
-.doc-preview-card .doc-title-bar {
-  padding: 12px 20px; background: #F8F9FB; border-bottom: 1px solid var(--border);
-  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary);
+.doc-page h2 { text-align: center; font-size: 16pt; margin-bottom: 16px; font-weight: normal; letter-spacing: 2px; }
+.doc-page table {
+  width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10.5pt;
 }
-.doc-preview-card .doc-title-bar .dot { width: 8px; height: 8px; border-radius: 50%; }
-.doc-preview-card .doc-title-bar .dot.red { background: #FF5F56; }
-.doc-preview-card .doc-title-bar .dot.yellow { background: #FFBD2E; }
-.doc-preview-card .doc-title-bar .dot.green { background: #27C93F; }
+.doc-page table th, .doc-page table td {
+  border: 1px solid #000; padding: 4px 8px; text-align: center; vertical-align: middle;
+}
+.doc-page table th { background: #f5f5f5; font-weight: normal; }
 
-.doc-preview-card .doc-content {
-  padding: 30px 40px; min-height: 400px; font-size: 14px; line-height: 2;
-  color: var(--text);
+/* 可点击的待填字段 */
+.field-placeholder {
+  display: inline-block; min-width: 60px; min-height: 20px; padding: 2px 8px;
+  background: #EBF5FF; border: 1px dashed #409EFF; border-radius: 3px;
+  cursor: pointer; color: #409EFF; font-size: 10.5pt; font-family: inherit;
+  transition: all 0.2s; text-align: center;
 }
-.doc-preview-card .doc-content .field-row {
-  display: flex; gap: 8px; padding: 4px 0; border-bottom: 1px dashed #eee;
+.field-placeholder:hover { background: #D9ECFF; border-color: var(--primary); }
+.field-placeholder.filled {
+  background: #F0F9EB; border-color: var(--success); color: var(--text);
+  border-style: solid;
 }
-.doc-preview-card .doc-content .field-row .label { color: var(--text-secondary); white-space: nowrap; min-width: 80px; }
-.doc-preview-card .doc-content .field-row .value { color: var(--text); flex: 1; }
-
-.doc-preview-card .doc-content .section-title {
-  font-size: 15px; font-weight: 600; margin: 16px 0 8px; padding-bottom: 6px;
-  border-bottom: 2px solid var(--primary);
-}
-
-/* 状态步骤条 */
-.steps-bar {
-  display: flex; gap: 0; margin-bottom: 20px;
-}
-.steps-bar .step {
-  flex: 1; text-align: center; padding: 8px 4px; font-size: 12px;
-  color: var(--text-secondary); position: relative;
-}
-.steps-bar .step::after {
-  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
-  background: var(--border); border-radius: 2px;
-}
-.steps-bar .step.active { color: var(--primary); font-weight: 600; }
-.steps-bar .step.active::after { background: var(--primary); }
-.steps-bar .step.done { color: var(--success); }
-.steps-bar .step.done::after { background: var(--success); }
 
 /* 生成进度 */
-.generating {
-  display: flex; flex-direction: column; align-items: center; gap: 16px;
-}
-.generating .spinner {
-  width: 48px; height: 48px; border: 4px solid var(--border); border-top-color: var(--primary);
-  border-radius: 50%; animation: spin 0.8s linear infinite;
-}
+.generating { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-top: 80px; }
+.generating .spinner { width: 44px; height: 44px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .generating p { font-size: 14px; color: var(--text-secondary); }
+
+/* 文档完成卡片 */
+.doc-done-card {
+  background: var(--white); border-radius: 12px; box-shadow: var(--shadow);
+  width: 100%; max-width: 500px; padding: 40px; text-align: center;
+}
+.doc-done-card .icon { font-size: 56px; margin-bottom: 12px; }
+.doc-done-card h4 { font-size: 18px; margin-bottom: 6px; }
+.doc-done-card p { color: var(--text-secondary); font-size: 13px; }
+.doc-done-card .dl-btn {
+  display: inline-flex; align-items: center; gap: 6px; margin-top: 16px; padding: 10px 24px;
+  background: var(--primary); color: #fff; border-radius: 8px; text-decoration: none;
+  font-size: 14px; font-weight: 500; transition: background 0.2s;
+}
+.doc-done-card .dl-btn:hover { background: var(--primary-light); }
+.doc-done-card .checks {
+  margin-top: 16px; text-align: left; background: #F0F9EB; border-radius: 8px;
+  padding: 12px 16px; font-size: 13px; color: var(--success); line-height: 2;
+}
+
+/* 上传拖拽区 */
+.upload-drop-zone {
+  border: 2px dashed var(--border); border-radius: 12px; padding: 40px;
+  text-align: center; cursor: pointer; transition: all 0.2s; margin-top: 40px;
+  max-width: 500px; width: 100%;
+}
+.upload-drop-zone:hover, .upload-drop-zone.dragover { border-color: var(--primary); background: var(--primary-bg); }
+.upload-drop-zone .icon { font-size: 40px; margin-bottom: 8px; opacity: 0.5; }
+.upload-drop-zone p { font-size: 14px; color: var(--text-secondary); }
+.upload-drop-zone .hint { font-size: 12px; color: #C0C4CC; margin-top: 4px; }
 
 /* 响应式 */
 @media (max-width: 900px) {
   .app { flex-direction: column; }
-  .chat-panel { width: 100%; height: 50vh; min-width: auto; }
-  .preview-panel { height: 50vh; }
+  .chat-panel { width: 100%; height: 55vh; min-width: auto; }
+  .preview-panel { height: 45vh; }
 }
 </style>
 </head>
@@ -204,12 +285,48 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
         <p>高校教务办公数字员工 · 在线</p>
       </div>
     </div>
-    <div class="chat-messages" id="chatMessages">
-      <!-- 消息会动态插入 -->
+
+    <!-- 步骤条 -->
+    <div class="steps-bar" id="stepsBar">
+      <div class="step">选择模板</div>
+      <div class="step">识别字段</div>
+      <div class="step">信息收集</div>
+      <div class="step">核对确认</div>
+      <div class="step">生成文档</div>
     </div>
+
+    <div class="chat-messages" id="chatMessages"></div>
+
+    <!-- 功能面板 -->
+    <div class="func-panel">
+      <div class="func-grid">
+        <button class="func-btn" id="funcAutoFill" onclick="startAutoFill()">
+          <span class="func-icon">🤖</span>
+          <span class="func-text"><span class="title">完全自动填写</span><span class="desc">AI逐批收集一键生成</span></span>
+        </button>
+        <button class="func-btn" id="funcSelectFill" onclick="startSelectFill()" style="opacity:0.5;cursor:not-allowed;" title="开发中">
+          <span class="func-icon">📌</span>
+          <span class="func-text"><span class="title">指定位置填写</span><span class="desc">点击字段精准填充</span></span>
+        </button>
+        <button class="func-btn" id="funcCoFill" onclick="startCoFill()" style="opacity:0.5;cursor:not-allowed;" title="开发中">
+          <span class="func-icon">✍️</span>
+          <span class="func-text"><span class="title">人机协同填写</span><span class="desc">人工填写AI补全</span></span>
+        </button>
+        <button class="func-btn" id="funcUpload" onclick="triggerUpload()">
+          <span class="func-icon">📎</span>
+          <span class="func-text"><span class="title">知识文件上传</span><span class="desc">上传文件AI自动提取</span></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 输入区 -->
     <div class="chat-input">
-      <textarea id="userInput" rows="1" placeholder="请输入信息..." onkeydown="handleKeydown(event)"></textarea>
-      <button id="sendBtn" onclick="sendMessage()">➤</button>
+      <div class="upload-btn" title="上传文件">
+        📎
+        <input type="file" id="fileInput" accept=".docx,.doc,.pdf,.xlsx,.xls,.csv,.txt" onchange="handleFileUpload(event)" />
+      </div>
+      <textarea id="userInput" rows="1" placeholder="请输入信息..." onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
     </div>
   </div>
 
@@ -220,7 +337,7 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
         <h3 id="previewTitle">📄 文档预览</h3>
       </div>
       <div class="actions" id="previewActions" style="display:none;">
-        <button onclick="downloadDoc()">⬇ 下载文档</button>
+        <button onclick="downloadDoc()">⬇ 下载</button>
         <button class="primary" onclick="window.open(currentDownloadUrl)">打开链接</button>
       </div>
     </div>
@@ -239,44 +356,47 @@ html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Ping
 let sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
 let isStreaming = false;
 let currentDownloadUrl = '';
-let collectedFields = {};   // 收集到的字段
-let currentTemplate = '';   // 当前选择的模板
-let currentStep = 0;       // 当前步骤 0=未开始 1=选模板 2=收集中 3=核对 4=生成中 5=完成
-const steps = ['选择模板', '识别字段', '信息收集', '核对确认', '生成文档'];
+let currentTemplate = '';
+let currentStep = 0;  // 0=未开始 1=选模板 2=收集中 3=核对 4=生成中 5=完成
+let currentMode = '';  // '' | 'auto' | 'select' | 'co'
+let fieldData = {};    // 收集到的字段 {label: value}
+let parsedFields = []; // 从Agent解析出的字段列表
+let pendingChoices = null; // 等待用户选择的数据
 
 // ── API ──
 const API_URL = '/v1/chat/completions';
+const UPLOAD_URL = '/upload';
+
+// ── 自动调高 ──
+function autoResize(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 100) + 'px';
+}
 
 // ── 发送消息 ──
-async function sendMessage() {
+async function sendMessage(text) {
   const input = document.getElementById('userInput');
-  const text = input.value.trim();
-  if (!text || isStreaming) return;
+  const msg = text || input.value.trim();
+  if (!msg || isStreaming) return;
 
-  input.value = '';
-  input.style.height = 'auto';
-  appendMessage('user', text);
-  await callAgent(text);
+  if (!text) { input.value = ''; input.style.height = 'auto'; }
+  appendMessage('user', msg);
+  await callAgent(msg);
 }
 
 function handleKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-  // 自动调高
-  const ta = e.target;
-  ta.style.height = 'auto';
-  ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
 }
 
 // ── 添加消息气泡 ──
-function appendMessage(role, content) {
+function appendMessage(role, content, extra) {
   const container = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   const icon = role === 'assistant' ? '🎓' : '👤';
-  div.innerHTML = `
-    <div class="icon">${icon}</div>
-    <div class="bubble">${escapeHtml(content)}</div>
-  `;
+  let bubbleHtml = escapeHtml(content);
+  if (extra) bubbleHtml += extra;
+  div.innerHTML = `<div class="icon">${icon}</div><div class="bubble">${bubbleHtml}</div>`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
@@ -287,10 +407,7 @@ function createStreamingMessage() {
   const container = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = 'msg assistant';
-  div.innerHTML = `
-    <div class="icon">🎓</div>
-    <div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>
-  `;
+  div.innerHTML = `<div class="icon">🎓</div><div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
@@ -329,13 +446,12 @@ async function callAgent(userText) {
 
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
-      buffer = lines.pop(); // 保留未完成的行
+      buffer = lines.pop();
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6).trim();
         if (data === '[DONE]') break;
-
         try {
           const json = JSON.parse(data);
           const delta = json.choices?.[0]?.delta;
@@ -344,92 +460,163 @@ async function callAgent(userText) {
             bubble.innerHTML = renderMarkdown(fullText);
             document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
           }
-        } catch (e) { /* skip bad json */ }
+        } catch (e) {}
       }
     }
 
-    // 处理完成后的逻辑
     postProcessResponse(fullText);
 
   } catch (err) {
-    bubble.innerHTML = `<span style="color:#F56C6C;">⚠ 请求失败: ${escapeHtml(err.message)}</span>`;
+    bubble.innerHTML = `<span style="color:var(--danger);">⚠ 请求失败: ${escapeHtml(err.message)}</span>`;
   } finally {
     isStreaming = false;
     document.getElementById('sendBtn').disabled = false;
   }
 }
 
-// ── 响应后处理：提取下载链接、更新步骤、更新预览 ──
+// ── 响应后处理 ──
 function postProcessResponse(text) {
   // 检测下载链接
   const urlMatch = text.match(/https?:\/\/[^\s"<>]+\.docx[^\s"<>]*/);
   if (urlMatch) {
     currentDownloadUrl = urlMatch[0];
     currentStep = 5;
+    updateStepBar();
     updatePreview('done');
     document.getElementById('previewActions').style.display = 'flex';
+    return;
   }
 
-  // 检测模板选择阶段
-  if (text.includes('评价报告') && (text.includes('试卷分析') || text.includes('关联矩阵'))) {
+  // 检测模板选择
+  if (text.includes('评价报告') && (text.includes('试卷分析') || text.includes('关联矩阵')) && currentStep === 0) {
     currentStep = 1;
     updatePreview('template-select');
   }
 
-  // 检测字段收集阶段
-  if (text.includes('请填写') || text.includes('请提供')) {
-    if (currentStep < 2) currentStep = 2;
-    updatePreview('collecting');
-
-    // 尝试提取字段名
-    const fieldMatch = text.match(/(?:请填写|请提供)([^，。,\n]+)/);
-    if (fieldMatch) {
-      const fieldName = fieldMatch[1].trim();
-      updateStepsBar();
-    }
+  // 检测模板选定 → 调用解析
+  if ((text.includes('评价报告') || text.includes('试卷分析') || text.includes('关联矩阵')) && currentStep === 1) {
+    const tplMatch = text.match(/(评价报告|试卷分析|关联矩阵)/);
+    if (tplMatch) currentTemplate = tplMatch[1];
   }
 
-  // 检测核对阶段
+  // 检测字段收集
+  if (text.includes('请填写') || text.includes('请提供') || text.includes('请输入')) {
+    if (currentStep < 2) currentStep = 2;
+    // 提取字段名
+    const fieldMatches = text.matchAll(/(?:请填写|请提供|请输入)[：:]?\s*[-–]?\s*(?:【)?([^\n,，。】【]+?)(?:】)?/g);
+    for (const m of fieldMatches) {
+      if (m[1] && m[1].trim().length < 20) {
+        const label = m[1].trim();
+        if (!parsedFields.includes(label)) parsedFields.push(label);
+      }
+    }
+    updatePreview('collecting');
+  }
+
+  // 检测收集到的字段值
+  const kvMatches = text.matchAll(/[-–]\s*(.+?)[：:]\s*(.+)/g);
+  for (const m of kvMatches) {
+    const key = m[1].trim();
+    const val = m[2].trim();
+    if (key && val && key.length < 20) fieldData[key] = val;
+  }
+
+  // 检测核对
   if (text.includes('核对') || text.includes('确认')) {
-    currentStep = 3;
+    if (currentStep < 3) currentStep = 3;
     updatePreview('confirm');
   }
 
-  // 检测生成阶段
-  if (text.includes('正在') && text.includes('生成')) {
+  // 检测生成中
+  if (text.includes('正在') && (text.includes('生成') || text.includes('渲染'))) {
     currentStep = 4;
     updatePreview('generating');
   }
 
-  updateStepsBar();
+  // 检测需要信息提示（用于知识上传场景）
+  if (text.includes('缺少') || text.includes('缺失') || text.includes('未提供')) {
+    highlightUploadBtn();
+  }
+
+  // 检测选择项
+  const choicesMatch = text.match(/[①②③④⑤⑥⑦⑧⑨⑩]/g);
+
+  updateStepBar();
 }
 
-// ── 简易 Markdown 渲染 ──
-function renderMarkdown(text) {
-  let html = escapeHtml(text);
-  // 下载链接
-  html = html.replace(/(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
-    '<a class="download-link" href="$1" target="_blank">📥 下载文档</a>');
-  // 粗体
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  // 列表项
-  html = html.replace(/^- (.+)$/gm, '<div style="padding-left:12px;">• $1</div>');
-  html = html.replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px;">$1</div>');
-  // 换行
-  html = html.replace(/\n/g, '<br>');
-  return html;
-}
-
-// ── 更新步骤条 ──
-function updateStepsBar() {
+function updateStepBar() {
   const bar = document.getElementById('stepsBar');
-  if (!bar) return;
   const items = bar.querySelectorAll('.step');
   items.forEach((el, i) => {
     el.className = 'step';
     if (i < currentStep) el.classList.add('done');
     else if (i === currentStep) el.classList.add('active');
   });
+}
+
+// ── 功能1：完全自动填写 ──
+async function startAutoFill() {
+  if (isStreaming) return;
+  currentMode = 'auto';
+
+  // 高亮按钮
+  document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('funcAutoFill').classList.add('active');
+
+  if (currentStep === 0) {
+    appendMessage('user', '🤖 启动完全自动填写模式');
+    await callAgent('你好，我要使用完全自动填写模式生成教务文档，请展示可用模板');
+  } else {
+    appendMessage('user', '🤖 继续自动填写');
+    await callAgent('继续收集信息');
+  }
+}
+
+// ── 功能2：指定位置填写（开发中） ──
+function startSelectFill() { /* 开发中 */ }
+
+// ── 功能3：人机协同（开发中） ──
+function startCoFill() { /* 开发中 */ }
+
+// ── 功能4：知识文件上传 ──
+function triggerUpload() {
+  document.getElementById('fileInput').click();
+}
+
+async function handleFileUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = ''; // 重置
+
+  // 在聊天中显示文件卡片
+  const sizeStr = file.size < 1024*1024 ? (file.size/1024).toFixed(1)+'KB' : (file.size/1024/1024).toFixed(1)+'MB';
+  appendMessage('user', `📎 上传了文件：${file.name}（${sizeStr}）`);
+
+  // 上传文件
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch(UPLOAD_URL, { method: 'POST', body: formData });
+    if (!resp.ok) throw new Error(`上传失败 HTTP ${resp.status}`);
+    const result = await resp.json();
+
+    if (result.success && result.extracted_text) {
+      // 把提取的内容发送给Agent
+      const agentMsg = `我上传了文件"${file.name}"，以下是文件内容，请从中提取填写文档所需的信息：\n\n${result.extracted_text.substring(0, 3000)}`;
+      await callAgent(agentMsg);
+    } else {
+      appendMessage('assistant', `⚠ 文件解析失败：${result.error || '未知错误'}，请尝试其他格式或直接输入信息。`);
+    }
+  } catch (err) {
+    appendMessage('assistant', `⚠ 文件上传失败：${escapeHtml(err.message)}，请检查网络后重试。`);
+  }
+}
+
+function highlightUploadBtn() {
+  const btn = document.getElementById('funcUpload');
+  btn.style.animation = 'pulse 1s ease 3';
+  setTimeout(() => btn.style.animation = '', 3000);
 }
 
 // ── 更新右侧预览 ──
@@ -441,90 +628,139 @@ function updatePreview(state) {
     case 'template-select':
       title.textContent = '📄 选择模板';
       body.innerHTML = `
-        <div class="doc-preview-card">
-          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 可用模板</div>
-          <div class="doc-content">
-            <div class="section-title">📂 可选教务文档模板</div>
-            <div class="field-row"><div class="label">1️⃣ 评价报告</div><div class="value">专业课程目标达成度评价报告</div></div>
-            <div class="field-row"><div class="label">2️⃣ 试卷分析</div><div class="value">试卷分析表（考勤+分数分布）</div></div>
-            <div class="field-row"><div class="label">3️⃣ 关联矩阵</div><div class="value">考题与课程目标关联矩阵</div></div>
-            <p style="margin-top:16px;color:var(--text-secondary);font-size:13px;">💡 请在左侧聊天区回复模板编号或名称</p>
-          </div>
+        <div class="doc-page" style="max-width:500px;padding:32px;">
+          <h2>可选教务文档模板</h2>
+          <table>
+            <tr><th style="width:60px;">编号</th><th>模板名称</th><th>说明</th></tr>
+            <tr><td>1</td><td style="cursor:pointer;color:var(--primary);" onclick="sendMessage('1')">评价报告</td><td>专业课程目标达成度评价报告</td></tr>
+            <tr><td>2</td><td style="cursor:pointer;color:var(--primary);" onclick="sendMessage('2')">试卷分析</td><td>试卷分析表（考勤+分数分布）</td></tr>
+            <tr><td>3</td><td style="cursor:pointer;color:var(--primary);" onclick="sendMessage('3')">关联矩阵</td><td>考题与课程目标关联矩阵</td></tr>
+          </table>
+          <p style="font-size:11px;color:var(--text-secondary);margin-top:8px;">💡 点击模板名称或回复编号选择</p>
         </div>`;
       break;
 
     case 'collecting':
-      title.textContent = '📝 信息收集中';
-      body.innerHTML = `
-        <div class="doc-preview-card">
-          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 填写进度</div>
-          <div class="doc-content">
-            <div class="section-title">📋 字段收集进度</div>
-            <div style="padding:20px 0;text-align:center;">
-              <div style="font-size:48px;margin-bottom:12px;">✍️</div>
-              <p style="color:var(--text-secondary);">正在分批收集信息，请在左侧逐项填写...</p>
-              <div style="margin-top:16px;background:var(--primary-bg);border-radius:8px;padding:12px 16px;text-align:left;font-size:13px;color:var(--primary);">
-                💡 每批2-3个字段，收集完毕后会展示核对清单
-              </div>
-            </div>
-          </div>
-        </div>`;
+      title.textContent = `📝 信息收集 - ${currentTemplate || ''}`;
+      renderDocPreview();
       break;
 
     case 'confirm':
       title.textContent = '✅ 核对确认';
-      body.innerHTML = `
-        <div class="doc-preview-card">
-          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 核对清单</div>
-          <div class="doc-content">
-            <div class="section-title">📋 请核对填写内容</div>
-            <p style="color:var(--text-secondary);font-size:13px;line-height:1.8;">
-              机器人已展示完整核对清单，请仔细检查所有字段。<br>
-              确认无误后回复 <strong>"确认"</strong>，如有修改请直接说明。
-            </p>
-            <div style="margin-top:16px;background:#F0F9EB;border-radius:8px;padding:12px 16px;font-size:13px;color:#67C23A;">
-              ✅ 确认后将自动生成文档并上传
-            </div>
-          </div>
-        </div>`;
+      renderDocPreview();
       break;
 
     case 'generating':
       title.textContent = '⏳ 生成中...';
-      body.innerHTML = `
-        <div class="generating">
-          <div class="spinner"></div>
-          <p>正在联通自动化渲染引擎，请稍候...</p>
-        </div>`;
+      body.innerHTML = `<div class="generating"><div class="spinner"></div><p>正在生成文档，请稍候...</p></div>`;
       break;
 
     case 'done':
       title.textContent = '📄 文档已生成';
       body.innerHTML = `
-        <div class="doc-preview-card">
-          <div class="doc-title-bar"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>&nbsp; 生成成功</div>
-          <div class="doc-content">
-            <div style="text-align:center;padding:30px 0;">
-              <div style="font-size:56px;margin-bottom:12px;">🎉</div>
-              <h4 style="font-size:18px;margin-bottom:8px;">文档生成成功！</h4>
-              <p style="color:var(--text-secondary);font-size:13px;">格式与模板100%一致，可直接下载使用</p>
-              <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;">
-                <a href="${currentDownloadUrl}" target="_blank" class="download-link" style="font-size:14px;padding:10px 24px;">📥 下载Word文档</a>
-              </div>
-            </div>
-            <div style="margin-top:16px;padding:12px 16px;background:#F0F9EB;border-radius:8px;font-size:13px;color:#67C23A;line-height:1.8;">
-              ✅ 文档格式与模板完全一致<br>
-              ✅ 所有字段已正确填入<br>
-              ✅ 链接24小时内有效
-            </div>
+        <div class="doc-done-card">
+          <div class="icon">🎉</div>
+          <h4>文档生成成功！</h4>
+          <p>格式与模板100%一致</p>
+          <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">📥 下载Word文档</a>
+          <div class="checks">
+            ✅ 文档格式与模板完全一致<br>
+            ✅ 所有字段已正确填入<br>
+            ✅ 链接24小时内有效
           </div>
         </div>`;
       break;
+
+    default:
+      title.textContent = '📄 文档预览';
+      body.innerHTML = `<div class="empty-state"><div class="icon-big">📋</div><h4>文档预览区</h4><p>选择模板并填写信息后<br>生成的文档将在此展示</p></div>`;
   }
 }
 
+// ── 渲染文档HTML预览（基于收集到的字段数据） ──
+function renderDocPreview() {
+  const body = document.getElementById('previewBody');
+
+  // 基础信息字段
+  const basicFields = ['课程名称','课程代码','开课学期','授课教师','学分','学时','课程性质'];
+  // 课程目标组
+  const goalFields = ['实现途径','评价方法'];
+
+  let basicHtml = '';
+  for (const f of basicFields) {
+    const val = fieldData[f] || '';
+    const cls = val ? 'filled' : '';
+    const display = val || '待填写';
+    basicHtml += `<tr><td style="width:90px;text-align:right;font-weight:500;">${f}：</td>
+      <td><span class="field-placeholder ${cls}">${display}</span></td></tr>`;
+  }
+
+  // 课程目标行（最多12组）
+  let goalRows = '';
+  for (let i = 1; i <= 12; i++) {
+    const approach = fieldData[`实现途径${i}`] || fieldData['实现途径'] || '';
+    const method = fieldData[`评价方法${i}`] || fieldData['评价方法'] || '';
+    if (i <= 4 || approach || method) {  // 显示前4组或有数据的
+      const aCls = approach ? 'filled' : '';
+      const mCls = method ? 'filled' : '';
+      goalRows += `<tr>
+        <td style="width:50px;">目标${i}</td>
+        <td><span class="field-placeholder ${aCls}">${approach || '待填写'}</span></td>
+        <td><span class="field-placeholder ${mCls}">${method || '待填写'}</span></td>
+      </tr>`;
+    }
+  }
+
+  if (!goalRows) {
+    goalRows = `<tr><td colspan="3" style="color:var(--text-secondary);">课程目标信息收集后显示</td></tr>`;
+  }
+
+  // 总结和改进措施
+  const summary = fieldData['课程总结'] || '';
+  const improve = fieldData['改进措施'] || '';
+
+  body.innerHTML = `
+    <div class="doc-page">
+      <h2>${currentTemplate || '教务文档'}</h2>
+
+      <table>
+        <tr><th colspan="2" style="background:#f0f0f0;font-weight:600;">基本信息</th></tr>
+        ${basicHtml}
+      </table>
+
+      <table>
+        <tr><th style="width:50px;">序号</th><th>实现途径</th><th>评价方法</th></tr>
+        ${goalRows}
+      </table>
+
+      <table>
+        <tr><td style="width:90px;text-align:right;font-weight:500;">课程总结：</td>
+          <td><span class="field-placeholder ${summary?'filled':''}">${summary || '待填写'}</span></td></tr>
+        <tr><td style="text-align:right;font-weight:500;">改进措施：</td>
+          <td><span class="field-placeholder ${improve?'filled':''}">${improve || '待填写'}</span></td></tr>
+      </table>
+
+      <p style="font-size:10px;color:var(--text-secondary);margin-top:12px;text-align:center;">
+        📝 以上为HTML预览，生成Word文档格式与模板100%一致
+      </p>
+    </div>`;
+}
+
+// ── 下载 ──
 function downloadDoc() {
   if (currentDownloadUrl) window.open(currentDownloadUrl);
+}
+
+// ── Markdown渲染 ──
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
+    '<a class="download-link" href="$1" target="_blank">📥 下载文档</a>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/^- (.+)$/gm, '<div style="padding-left:12px;">• $1</div>');
+  html = html.replace(/^\d+\. (.+)$/gm, '<div style="padding-left:12px;">$1</div>');
+  html = html.replace(/\n/g, '<br>');
+  return html;
 }
 
 function escapeHtml(text) {
@@ -533,11 +769,23 @@ function escapeHtml(text) {
   return d.innerHTML;
 }
 
-// ── 初始化：自动打招呼 ──
+// ── 初始化 ──
 window.addEventListener('load', () => {
-  // 不自动发送，等待用户输入
-  appendMessage('assistant', '您好！我是高校教务办公数字员工 🎓\n\n我可以帮您自动生成教务报告文档，格式与模板100%一致。\n\n请说"你好"开始，或直接告诉我您需要生成什么文档。');
+  appendMessage('assistant',
+    '您好！我是高校教务办公数字员工 🎓\n\n' +
+    '我可以帮您自动生成教务报告文档，格式与模板100%一致。\n\n' +
+    '👇 您可以：\n' +
+    '• 点击左下角「完全自动填写」一键启动\n' +
+    '• 点击「知识文件上传」上传文件让我自动提取信息\n' +
+    '• 或直接输入"你好"开始对话'
+  );
+  updateStepBar();
 });
+
+// 脉冲动画
+const style = document.createElement('style');
+style.textContent = '@keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.05);box-shadow:0 0 12px rgba(79,110,247,0.4)} }';
+document.head.appendChild(style);
 </script>
 </body>
 </html>

@@ -9,7 +9,7 @@ from typing import Any, Dict, Iterable, AsyncIterable, AsyncGenerator, Optional
 import cozeloop
 import uvicorn
 import time
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -492,6 +492,34 @@ async def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """接收前端上传的文件，解析文本内容后返回"""
+    import tempfile
+    from tools.knowledge_tool import extract_text_from_upload
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    # 文件大小限制 10MB
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    # 保存到临时文件
+    suffix = os.path.splitext(file.filename)[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        result = extract_text_from_upload(tmp_path)
+        result["filename"] = file.filename
+        return JSONResponse(content=result)
+    finally:
+        os.unlink(tmp_path)
 
 
 @app.get(path="/graph_parameter")
