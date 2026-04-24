@@ -364,8 +364,43 @@ let parsedFields = []; // 从Agent解析出的字段列表
 let pendingChoices = null; // 等待用户选择的数据
 
 // ── API ──
-const API_URL = '/v1/chat/completions';
-const UPLOAD_URL = '/upload';
+// 智能检测基础URL，确保前端请求能到达后端
+function detectBaseUrl() {
+  const origin = window.location.origin;
+  // file:// 协议 = 本地直接打开HTML，无法连接后端
+  if (origin.startsWith('file://')) {
+    return null;
+  }
+  return origin;
+}
+const BASE_URL = detectBaseUrl();
+const API_URL = BASE_URL ? BASE_URL + '/v1/chat/completions' : null;
+const UPLOAD_URL = BASE_URL ? BASE_URL + '/upload' : null;
+console.log('[教务文档助手] BASE_URL:', BASE_URL);
+
+// 检测是否在正确的Web服务环境中
+if (!BASE_URL || !API_URL) {
+  // 不在Web服务环境中，显示引导提示
+  window.addEventListener('load', () => {
+    const body = document.getElementById('previewBody');
+    body.innerHTML = `
+      <div class="doc-done-card" style="border:2px solid var(--warning);">
+        <div class="icon">⚠️</div>
+        <h4>请通过Web服务访问</h4>
+        <p style="margin:12px 0;line-height:2;">
+          当前为静态文件预览，无法连接后端服务。<br>
+          请点击Coze平台右上角 <strong>「部署」</strong> 按钮，<br>
+          部署成功后通过访问链接打开此页面。<br><br>
+          或者在浏览器中直接访问：<br>
+          <code style="background:#f5f5f5;padding:4px 8px;border-radius:4px;font-size:13px;">
+            https://你的项目域名/web/index.html
+          </code>
+        </p>
+      </div>`;
+    document.getElementById('userInput').disabled = true;
+    document.getElementById('sendBtn').disabled = true;
+  });
+}
 
 // ── 自动调高 ──
 function autoResize(ta) {
@@ -375,6 +410,7 @@ function autoResize(ta) {
 
 // ── 发送消息 ──
 async function sendMessage(text) {
+  if (!API_URL) { alert('请通过部署后的Web服务URL访问，而非IDE文件预览'); return; }
   const input = document.getElementById('userInput');
   const msg = text || input.value.trim();
   if (!msg || isStreaming) return;
@@ -584,6 +620,7 @@ function triggerUpload() {
 }
 
 async function handleFileUpload(event) {
+  if (!UPLOAD_URL) { alert('请通过部署后的Web服务URL访问，而非IDE文件预览'); return; }
   const file = event.target.files[0];
   if (!file) return;
   event.target.value = ''; // 重置
