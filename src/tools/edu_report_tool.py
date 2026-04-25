@@ -29,13 +29,13 @@ _W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 # 模板注册表：key=模板名称, value=文件路径
 TEMPLATE_REGISTRY = {
-    "评价报告": "assets/template.docx",
-    "试卷分析": "assets/template_exam.docx",
-    "关联矩阵": "assets/template_matrix.docx",
+    "评价报告": "assets/2023-2024-2《xxx》 岭南师范学院专业课程目标达成度评价报告模板.docx",
+    "试卷分析": "assets/2023-2024-2《xxx》 试卷分析模板.docx",
+    "关联矩阵": "assets/2023-2024-2《xxx》岭南师范学院考题与课程目标及毕业要求关联矩阵表模板.docx",
 }
 
 # 行组复杂度阈值：列数超过此值视为复杂行组，跳过填充
-_MAX_SIMPLE_GROUP_COLS = 10
+_MAX_SIMPLE_GROUP_COLS = 15
 
 # S3 客户端
 _s3_storage = None
@@ -128,7 +128,11 @@ def _add_table_row_after(table, after_row_idx: int):
 
 
 def _fill_label_fields(doc, analysis: dict, data: dict):
-    """填充标签字段：在"标签："后追加用户值。跳过行组覆盖区域。"""
+    """填充标签字段。支持两种模式：
+    - fill_mode="append"：在"标签："后追加用户值（冒号模式）
+    - fill_mode="set"：直接设置空白格内容（标签格+空白格模式）
+    跳过行组覆盖区域。
+    """
     row_groups = analysis["row_groups"]
 
     def _in_row_group(t_idx, r_idx):
@@ -145,6 +149,7 @@ def _fill_label_fields(doc, analysis: dict, data: dict):
 
         t_idx = field_info["table_idx"]
         table = doc.tables[t_idx]
+        fill_mode = field_info.get("fill_mode", "append")
         row_indices = [r for r in field_info["row_indices"] if not _in_row_group(t_idx, r)]
 
         if not row_indices:
@@ -154,13 +159,21 @@ def _fill_label_fields(doc, analysis: dict, data: dict):
             for i, row_idx in enumerate(row_indices):
                 if i < len(value):
                     unique = _get_unique_cells(table.rows[row_idx])
-                    if field_info["col_idx"] < len(unique):
-                        _append_after_label(unique[field_info["col_idx"]], label, value[i])
+                    col_idx = field_info["col_idx"]
+                    if col_idx < len(unique):
+                        if fill_mode == "set":
+                            _set_cell_text(unique[col_idx], str(value[i]))
+                        else:
+                            _append_after_label(unique[col_idx], label, value[i])
         else:
             row_idx = row_indices[0]
             unique = _get_unique_cells(table.rows[row_idx])
-            if field_info["col_idx"] < len(unique):
-                _append_after_label(unique[field_info["col_idx"]], label, value)
+            col_idx = field_info["col_idx"]
+            if col_idx < len(unique):
+                if fill_mode == "set":
+                    _set_cell_text(unique[col_idx], str(value))
+                else:
+                    _append_after_label(unique[col_idx], label, value)
 
 
 def _fill_simple_row_groups(doc, analysis: dict, data: dict):
