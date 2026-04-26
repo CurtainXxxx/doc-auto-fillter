@@ -1,8 +1,10 @@
 """模板解析器 - 自动识别Word模板中所有可填充字段，输出精简的用户收集清单
 
-支持两种字段模式：
+支持的字段模式：
 1. "标签：值"模式 - 冒号后为空则待填（如 "课程名称："）
 2. "标签格+空白格"模式 - 标签文字单独在一个格，紧邻空白格为待填（如 |课程名称|[空白]|）
+3. "标签格+占位符格"模式 - 标签文字后有占位符（如 |题号|[%]|）需替换占位符
+4. "多列数据行"模式 - 表头行下有空白/占位符行，按表头名识别（如 题型百分比、分数段人数等）
 """
 
 import os
@@ -24,6 +26,17 @@ _MAX_SIMPLE_GROUP_COLS = 15
 # 已知的标签文字黑名单（这些不是待填字段，而是表头或装饰文字）
 _LABEL_BLACKLIST = {'序号', '编号', '合计', '总计', '备注', '说明', '项', '次', '类', '号'}
 
+# 选项类标签不算待填字段
+_OPTION_WORDS = {'选修', '必修', '开卷', '闭卷', '试题库', '试卷库', '教师组题', '是', '否',
+                '优秀', '良好', '中等', '及格', '不及格', 'A', 'B', 'C', 'D', '√', '✓', '○', '●',
+                '本人阅卷', '同行阅卷', '集体阅卷', '机器阅卷', '其他'}
+
+# 占位符文字（需要替换为实际值的格）
+_PLACEHOLDER_TEXTS = {'%', '…', '……', '...', '—', '--', '___', '□', '○'}
+
+# 章节标题行标签（这些行不包含待填字段，只是标题）
+_SECTION_TITLE_LABELS = {'试卷分析', '试　卷　分　析', '课程目标与试卷题目的对应关系'}
+
 
 def _get_unique_cells(row) -> list:
     """获取行中的独立单元格 (跳过被合并重复的)"""
@@ -42,14 +55,18 @@ def _is_section_title_row(unique_cells) -> bool:
     if len(unique_cells) != 1:
         return False
     text = unique_cells[0].text.strip()
-    return bool(re.match(r'^[一二三四五六七八九十]+[、.．]', text))
+    # 标准编号标题
+    if re.match(r'^[一二三四五六七八九十]+[、.．]', text):
+        return True
+    # 全宽空格标题（如"试　卷　分　析"）
+    if text in _SECTION_TITLE_LABELS:
+        return True
+    # gridSpan跨整行的标题格
+    return False
 
 
 def _is_empty_data_row(unique_cells) -> bool:
-    """判断是否是空白数据行：大部分格为空，且不含标签模式。
-    含"："的行属于待填标签行，不应归入纯数据行组。
-    也排除"标签格+空白格"模式的行（有标签但非表头）。
-    """
+    """判断是否是空白数据行：大部分格为空，且不含标签模式。"""
     if not unique_cells:
         return True
     empty = sum(1 for c in unique_cells if not c.text.strip())
@@ -59,7 +76,8 @@ def _is_empty_data_row(unique_cells) -> bool:
     short_label_count = sum(1 for c in unique_cells
                            if c.text.strip() and 2 <= len(c.text.strip()) <= 8
                            and not re.search(r'[：:]', c.text.strip())
-                           and c.text.strip() not in _LABEL_BLACKLIST)
+                           and c.text.strip() not in _LABEL_BLACKLIST
+                           and c.text.strip() not in _OPTION_WORDS)
     return empty >= len(unique_cells) * 0.5 and label_count == 0 and short_label_count == 0
 
 
@@ -115,23 +133,26 @@ def _is_label_cell(cell) -> bool:
     # 纯数字不是标签
     if re.match(r'^[\d.]+$', text):
         return False
+    # 纯标点符号不算标签
+    if re.match(r'^[^\w\u4e00-\u9fff]+$', text):
+        return False
     # 黑名单
     if text in _LABEL_BLACKLIST:
         return False
-    # 纯标点符号不算标签（如……、---、===等）
-    if re.match(r'^[^\w\u4e00-\u9fff]+$', text):
+    # 选项类
+    if text in _OPTION_WORDS:
         return False
     # 常见表头词不算标签
     header_words = {'试题', '题号', '分数', '得分', '评卷人', '项目', '内容', '签名', '日期'}
     if text in header_words:
         return False
-    # 选项类标签不算（如"选修""必修""开卷""闭卷""试题库""试卷库""教师组题""是""否"等）
-    # 这些是勾选项，不是待填字段
-    option_words = {'选修', '必修', '开卷', '闭卷', '试题库', '试卷库', '教师组题', '是', '否',
-                    '优秀', '良好', '中等', '及格', '不及格', 'A', 'B', 'C', 'D', '√', '✓', '○', '●'}
-    if text in option_words:
-        return False
     return True
+
+
+def _is_placeholder_cell(cell) -> bool:
+    """判断单元格是否是占位符格（如%、……等）"""
+    text = cell.text.strip()
+    return text in _PLACEHOLDER_TEXTS
 
 
 def _is_vmerge_continue(cell) -> bool:
@@ -142,9 +163,21 @@ def _is_vmerge_continue(cell) -> bool:
         vm_elem = vm.find(qn('w:vMerge'))
         if vm_elem is not None:
             val = vm_elem.get(qn('w:val'))
-            # val=None 或 val="continue" 都是延续格
             return val is None or val == "continue"
     return False
+
+
+def _get_grid_span(cell) -> int:
+    """获取单元格的gridSpan值"""
+    tc = cell._element
+    tcPr = tc.find(qn('w:tcPr'))
+    if tcPr is not None:
+        gs = tcPr.find(qn('w:gridSpan'))
+        if gs is not None:
+            val = gs.get(qn('w:val'))
+            if val:
+                return int(val)
+    return 1
 
 
 def analyze_template(template_path: str) -> dict:
@@ -189,47 +222,114 @@ def analyze_template(template_path: str) -> dict:
                         "pattern": "colon",
                     })
 
-        # ── 2. 扫描"标签格+空白格"模式 ──
+        # ── 2. 扫描"标签格+空白格/占位符格"模式 ──
+        # 扩展：不仅检查相邻格，还检查中间跳过选项标签格的情况
+        # 注意：当一行有"行标签+多列待填"模式时，跳过label_blank扫描（交给multi_col处理）
         for r_idx, row in enumerate(table.rows):
             unique = _get_unique_cells(row)
             if _is_section_title_row(unique):
                 continue
 
+            # 检测该行是否是"行标签+多列待填"模式
+            # 多列数据行特征：一个标签后连续>=2个空白格/占位符格，且中间没有标签格或选项格
+            # 标签-空白交替行特征：标签-空白-标签-空白 交替出现
+            # 选项-空白交替行特征：选项-空白-选项-空白 交替出现（勾选框行）
+            is_multi_col_row = False
+            first_label_idx = -1
+            consecutive_fillable = 0
+            max_consecutive_fillable = 0
+            label_blank_alternating = False
+            option_blank_alternating = False
+            
+            prev_was_label = False
+            prev_was_fillable = False
+            prev_was_option = False
+            for ci, cell in enumerate(unique):
+                if _is_vmerge_continue(cell):
+                    continue
+                text = cell.text.strip()
+                is_label = text and _is_label_cell(cell)
+                is_option = text and text in _OPTION_WORDS
+                is_fillable = not text or _is_placeholder_cell(cell)
+                
+                if is_label and first_label_idx < 0:
+                    first_label_idx = ci
+                
+                if (is_label or is_option) and prev_was_fillable:
+                    if is_label:
+                        label_blank_alternating = True
+                    if is_option:
+                        option_blank_alternating = True
+                
+                if is_fillable and first_label_idx >= 0:
+                    consecutive_fillable += 1
+                    max_consecutive_fillable = max(max_consecutive_fillable, consecutive_fillable)
+                elif is_label or is_option:
+                    consecutive_fillable = 0
+                
+                prev_was_label = is_label
+                prev_was_fillable = is_fillable
+                prev_was_option = is_option
+            
+            # 多列数据行：有行标签，后面连续>=2个待填格，且不是交替模式
+            is_multi_col_row = (first_label_idx >= 0 and max_consecutive_fillable >= 2 
+                               and not label_blank_alternating and not option_blank_alternating)
+            
             i = 0
-            while i < len(unique) - 1:
+            while i < len(unique):
                 cell = unique[i]
-                next_cell = unique[i + 1]
-
-                # 当前格是标签格，下一格是空白格（待填）
-                if (_is_label_cell(cell)
-                    and not next_cell.text.strip()
-                    and not _is_vmerge_continue(next_cell)):
-
+                
+                if _is_label_cell(cell):
                     label = cell.text.strip()
+                    
                     # 检查这个标签是否已经被冒号模式识别过
                     already_found = any(
                         f["table_idx"] == t_idx and f["row_idx"] == r_idx
                         and f["label"] == label and f["pattern"] == "colon"
                         for f in label_fields
                     )
-                    if not already_found:
-                        field_id = f"T{t_idx}_R{r_idx}_C{i+1}"
-                        label_fields.append({
-                            "field_id": field_id,
-                            "table_idx": t_idx,
-                            "row_idx": r_idx,
-                            "col_idx": i + 1,  # 指向空白格
-                            "line_idx": 0,
-                            "label": label,
-                            "existing_value": "",
-                            "description": f"请填写{label}",
-                            "fill_mode": "set",  # 直接设置空白格
-                            "pattern": "label_blank",
-                        })
+                    
+                    if not already_found and not is_multi_col_row:
+                        # 向后寻找第一个空白格或占位符格
+                        for j in range(i + 1, min(i + 4, len(unique))):  # 最多往后看3格
+                            next_cell = unique[j]
+                            next_text = next_cell.text.strip()
+                            
+                            if _is_vmerge_continue(next_cell):
+                                continue
+                            
+                            if not next_text or _is_placeholder_cell(next_cell):
+                                # 找到待填格
+                                fill_mode = "set"
+                                if _is_placeholder_cell(next_cell):
+                                    fill_mode = "replace"  # 替换占位符
+                                
+                                field_id = f"T{t_idx}_R{r_idx}_C{j}"
+                                label_fields.append({
+                                    "field_id": field_id,
+                                    "table_idx": t_idx,
+                                    "row_idx": r_idx,
+                                    "col_idx": j,  # 指向待填格
+                                    "line_idx": 0,
+                                    "label": label,
+                                    "existing_value": next_text if next_text else "",
+                                    "description": f"请填写{label}",
+                                    "fill_mode": fill_mode,
+                                    "pattern": "label_blank",
+                                })
+                                break
+                            elif next_text in _OPTION_WORDS:
+                                # 跳过选项格继续寻找
+                                continue
+                            else:
+                                # 遇到非选项非空白格，停止寻找
+                                break
                 i += 1
 
-            # 也检查行末尾的独立空白格（前面有标签格，但标签格和空白格之间可能隔了一格）
-            # 这种情况较少，暂不处理
+        # ── 2.5 扫描"表头+数据行"模式（多列数据行） ──
+        # 处理试卷分析中的"题型百分比"、"分数段人数/比例"等区域
+        # 这些区域特征：表头行有多个标签，下一行有空白格或占位符格待填
+        _scan_table_data_sections(table, t_idx, label_fields)
 
         # ── 3. 检测重复行组 ──
         r = 0
@@ -272,7 +372,6 @@ def analyze_template(template_path: str) -> dict:
                             "num_cols": num_cols,
                             "is_complex": num_cols > _MAX_SIMPLE_GROUP_COLS,
                         })
-                        # 标记行组覆盖的行
                         for marked_r in range(start, start + count):
                             row_group_rows[(t_idx, marked_r)] = group_id
                         continue
@@ -296,7 +395,21 @@ def analyze_template(template_path: str) -> dict:
         deduped_fields.append(first)
 
     # ── 5. 过滤掉已有值的字段（不需要用户填写） ──
-    deduped_fields = [f for f in deduped_fields if not f["existing_value"]]
+    # 注意：占位符字段（fill_mode="replace"）的existing_value是占位符文本，需要保留
+    deduped_fields = [f for f in deduped_fields
+                      if not f["existing_value"] or f.get("fill_mode") == "replace"]
+    
+    # ── 5.5 过滤掉完全属于行组区域的multi_col字段 ──
+    # 行组区域由行组填充逻辑处理，不需要单独的字段
+    # 但保留部分在行组外的multi_col字段
+    def _fully_in_row_group(field):
+        """如果字段的所有行都在行组区域内，返回True"""
+        for ri in field["row_indices"]:
+            if (field["table_idx"], ri) not in row_group_rows:
+                return False
+        return True
+    
+    deduped_fields = [f for f in deduped_fields if not _fully_in_row_group(f)]
 
     # ── 6. 按表格和行号排序 ──
     deduped_fields.sort(key=lambda f: (f["table_idx"], min(f["row_indices"]), f["col_idx"]))
@@ -340,6 +453,177 @@ def analyze_template(template_path: str) -> dict:
     }
 
     return result
+
+
+def _scan_table_data_sections(table, t_idx: int, label_fields: list):
+    """扫描表格中的"表头+数据行"区域，识别多列数据待填字段。
+    
+    处理的场景：
+    1. "标签+空白/占位符"在同行（如 |人数|[空白]|[空白]|...）
+    2. "表头行+数据行"配对（如"分数段"行下有"人数"行和"比例"行）
+    3. 纯占位符行（如全是%的行，需要替换）
+    """
+    for r_idx, row in enumerate(table.rows):
+        unique = _get_unique_cells(row)
+        if len(unique) < 2:
+            continue
+        if _is_section_title_row(unique):
+            continue
+        
+        # 检测"多列标签+待填"模式
+        # 模式A：行内有多个空白格/占位符格，且前面有标签格提供上下文
+        # 模式B：行内有"行标签"+"占位符格/空白格"序列（如 |人数|空白|空白|空白|...）
+        
+        _detect_multi_column_fields(table, t_idx, r_idx, unique, label_fields)
+
+
+def _detect_multi_column_fields(table, t_idx: int, r_idx: int, unique_cells: list, label_fields: list):
+    """检测多列待填字段。
+    
+    典型场景：
+    - 试卷分析行11: |分数分布(续)|人数|空白|空白|空白|空白|空白|
+    - 试卷分析行12: |分数分布(续)|比例|%|%|%|%|%|
+    - 试卷分析行9: |及百分比|%|%|%|%|%|%|%|%|%|
+    """
+    # 构建已被label_blank模式覆盖的格集合 (table_idx, row_idx, col_idx)
+    covered_cells = set()
+    for f in label_fields:
+        if f["pattern"] in ("label_blank", "colon"):
+            covered_cells.add((f["table_idx"], f["row_idx"], f["col_idx"]))
+    
+    # 检查此行是否有"行标签+多列待填"模式
+    row_label = None
+    fillable_cells = []  # (col_idx_in_unique, cell, existing_text)
+    
+    for ci, cell in enumerate(unique_cells):
+        if _is_vmerge_continue(cell):
+            continue
+        
+        text = cell.text.strip()
+        
+        # 第一个非空非选项格作为行标签
+        if row_label is None and text and _is_label_cell(cell):
+            row_label = text
+            continue
+        
+        # 跳过已被label_blank模式识别的格
+        if (t_idx, r_idx, ci) in covered_cells:
+            continue
+        
+        if not text or _is_placeholder_cell(cell):
+            fillable_cells.append((ci, cell, text))
+    
+    if not fillable_cells or len(fillable_cells) < 2:
+        logger.debug(f"multi_col T{t_idx}_R{r_idx}: no fillable cells (count={len(fillable_cells)})")
+        return
+    
+    logger.debug(f"multi_col T{t_idx}_R{r_idx}: row_label={row_label}, fillable_count={len(fillable_cells)}")
+    
+    # 需要为这些待填格生成有意义的标签
+    # 策略1：如果有行标签，用"行标签+列标签"
+    # 策略2：看上方行对应的格，获取列标签
+    
+    if row_label:
+        # 清理行标签中的换行符
+        row_label = row_label.replace('\n', '').replace('\r', '')
+        # 这是一个多列数据行（如人数行、比例行）
+        col_labels = _get_column_labels_for_row(table, t_idx, r_idx, unique_cells, fillable_cells)
+        
+        for idx, (ci, cell, existing) in enumerate(fillable_cells):
+            col_label = col_labels[idx] if idx < len(col_labels) else f"第{idx+1}列"
+            full_label = f"{row_label}_{col_label}"
+            
+            # 检查是否已存在
+            already = any(f["label"] == full_label and f["table_idx"] == t_idx for f in label_fields)
+            if already:
+                continue
+            
+            fill_mode = "replace" if existing else "set"
+            field_id = f"T{t_idx}_R{r_idx}_C{ci}"
+            label_fields.append({
+                "field_id": field_id,
+                "table_idx": t_idx,
+                "row_idx": r_idx,
+                "col_idx": ci,
+                "line_idx": 0,
+                "label": full_label,
+                "existing_value": existing if existing else "",
+                "description": f"请填写{row_label}的{col_label}",
+                "fill_mode": fill_mode,
+                "pattern": "multi_col",
+            })
+    
+    else:
+        # 没有行标签，但有多个待填格
+        col_labels = _get_column_labels_for_row(table, t_idx, r_idx, unique_cells, fillable_cells)
+        above_label = _get_row_label_from_above(table, t_idx, r_idx)
+        
+        for idx, (ci, cell, existing) in enumerate(fillable_cells):
+            col_label = col_labels[idx] if idx < len(col_labels) else f"第{idx+1}列"
+            if above_label:
+                full_label = f"{above_label}_{col_label}"
+            else:
+                full_label = col_label
+            
+            already = any(f["label"] == full_label and f["table_idx"] == t_idx for f in label_fields)
+            if already:
+                continue
+            
+            fill_mode = "replace" if existing else "set"
+            field_id = f"T{t_idx}_R{r_idx}_C{ci}"
+            label_fields.append({
+                "field_id": field_id,
+                "table_idx": t_idx,
+                "row_idx": r_idx,
+                "col_idx": ci,
+                "line_idx": 0,
+                "label": full_label,
+                "existing_value": existing if existing else "",
+                "description": f"请填写{full_label}",
+                "fill_mode": fill_mode,
+                "pattern": "multi_col",
+            })
+
+
+def _get_column_labels_for_row(table, t_idx: int, r_idx: int, unique_cells: list, fillable_cells: list) -> list:
+    """获取待填格对应的列标签（从上方表头行获取）"""
+    col_labels = []
+    
+    # 向上查找表头行
+    for above_r in range(r_idx - 1, max(r_idx - 5, -1), -1):
+        above_unique = _get_unique_cells(table.rows[above_r])
+        if len(above_unique) < len(fillable_cells):
+            continue
+        
+        for idx, (ci, cell, _) in enumerate(fillable_cells):
+            # 尝试从上方行对应位置的格获取列标签
+            if ci < len(above_unique):
+                above_text = above_unique[ci].text.strip().replace('\n', '')
+                if above_text and above_text not in _PLACEHOLDER_TEXTS and len(above_text) <= 15:
+                    col_labels.append(above_text)
+                else:
+                    col_labels.append(f"第{idx+1}列")
+            else:
+                col_labels.append(f"第{idx+1}列")
+        
+        # 检查是否获取到有意义的标签
+        meaningful = sum(1 for l in col_labels if not l.startswith('第'))
+        if meaningful > 0:
+            return col_labels
+    
+    # 没找到，用序号
+    return [f"第{idx+1}列" for idx in range(len(fillable_cells))]
+
+
+def _get_row_label_from_above(table, t_idx: int, r_idx: int) -> Optional[str]:
+    """从上方行获取行标签"""
+    for above_r in range(r_idx - 1, max(r_idx - 3, -1), -1):
+        above_unique = _get_unique_cells(table.rows[above_r])
+        if above_unique:
+            first_text = above_unique[0].text.strip()
+            if first_text and _is_label_cell(above_unique[0]):
+                return first_text
+    return None
 
 
 if __name__ == "__main__":
