@@ -260,6 +260,12 @@ if os.path.isdir(_web_dir):
     app.mount("/web", StaticFiles(directory=_web_dir, html=True), name="web")
     logger.info(f"Frontend mounted at /web from {_web_dir}")
 
+# 根路径重定向到 /web/
+from starlette.responses import RedirectResponse
+@app.get("/", include_in_schema=False)
+async def root_redirect():
+    return RedirectResponse(url="/web/")
+
 # OpenAI 兼容接口处理器
 openai_handler = OpenAIChatHandler(service)
 
