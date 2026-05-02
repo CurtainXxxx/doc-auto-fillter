@@ -1,7 +1,7 @@
 """知识文件解析工具 - 解析用户上传的文件，提取文档所需信息"""
 
 import os
-import tempfile
+import re
 import json
 from langchain.tools import tool
 from coze_coding_utils.log.write_log import request_context
@@ -35,9 +35,17 @@ def _extract_text_from_file(file_path: str) -> str:
                     text_parts.append(para.text.strip())
             for table in doc.tables:
                 for row in table.rows:
-                    cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                    if cells:
-                        text_parts.append(' | '.join(cells))
+                    # 用unique cells避免合并单元格重复
+                    seen = set()
+                    cells = []
+                    for cell in row.cells:
+                        cid = id(cell._element)
+                        if cid not in seen:
+                            seen.add(cid)
+                            cells.append(cell.text.strip())
+                    non_empty = [c for c in cells if c]
+                    if non_empty:
+                        text_parts.append(' | '.join(non_empty))
             return '\n'.join(text_parts)
         except Exception as e:
             return f"[docx解析失败: {str(e)}]"
@@ -59,20 +67,14 @@ def _extract_text_from_file(file_path: str) -> str:
 
     if ext == '.pdf':
         try:
-            from coze_coding_dev_sdk.fetch import FetchClient
-            client = FetchClient()
-            # PDF本地文件用sdk解析不了，尝试用PyPDF2
-            try:
-                from PyPDF2 import PdfReader
-                reader = PdfReader(file_path)
-                text_parts = []
-                for page in reader.pages:
-                    t = page.extract_text()
-                    if t:
-                        text_parts.append(t)
-                return '\n'.join(text_parts)
-            except ImportError:
-                return "[PDF解析需要安装PyPDF2，请使用其他格式文件]"
+            from PyPDF2 import PdfReader
+            reader = PdfReader(file_path)
+            text_parts = []
+            for page in reader.pages:
+                t = page.extract_text()
+                if t:
+                    text_parts.append(t)
+            return '\n'.join(text_parts)
         except Exception as e:
             return f"[PDF解析失败: {str(e)}]"
 
@@ -95,6 +97,91 @@ def extract_text_from_upload(file_path: str) -> dict:
         return {"success": False, "extracted_text": "", "error": str(e)}
 
 
+def _find_field_in_text(field: str, content: str) -> list:
+    """
+    在文本内容中智能搜索字段的值。
+    支持多种格式：
+    - 冒号模式: 课程性质：专业必修课 / 课程性质: 专业必修课
+    - 等号模式: 课程性质＝专业必修课 / 课程性质=专业必修课
+    - 管道符/表格模式: 课程性质 | 专业必修课
+    - "是"模式: 课程性质是专业必修课
+    - 【】模式: 【课程性质】专业必修课
+    """
+    found = []
+
+    # 标准化字段名，去掉可能的空格
+    field_clean = field.strip()
+
+    for line in content.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+
+        # ── 模式1: 冒号/等号分隔 ──
+        # 课程性质：专业必修课 / 课程性质: 专业必修课
+        for sep in ['：', ':', '＝', '=']:
+            # 精确匹配: 行首或管道符后 + 字段名 + 分隔符
+            patterns = [
+                re.compile(r'(?:^|\|)\s*' + re.escape(field_clean) + r'\s*' + re.escape(sep) + r'\s*(.+?)(?:\s*\||$)'),
+            ]
+            for pat in patterns:
+                m = pat.search(line)
+                if m:
+                    val = m.group(1).strip().rstrip('，。,.;；')
+                    if val and len(val) < 100 and val != field_clean:
+                        found.append(val)
+                        break
+            else:
+                continue
+            break  # 如果已经匹配到了，跳过其他分隔符
+
+        if found:
+            # 已经在这行找到了，跳到下一行
+            continue
+
+        # ── 模式2: 管道符/表格格式 ──
+        # ... | 课程性质 | 专业必修课 | ...
+        if '|' in line:
+            parts = [p.strip() for p in line.split('|') if p.strip()]
+            for i, part in enumerate(parts):
+                if part == field_clean and i + 1 < len(parts):
+                    val = parts[i + 1].rstrip('，。,.;；')
+                    if val and len(val) < 100 and val != field_clean:
+                        found.append(val)
+                        break
+
+        if found:
+            continue
+
+        # ── 模式3: "是"连接 ──
+        # 课程性质是专业必修课
+        m = re.search(re.escape(field_clean) + r'是(.+?)(?:[,，。.;；\|]|$)', line)
+        if m:
+            val = m.group(1).strip()
+            if val and len(val) < 100:
+                found.append(val)
+                continue
+
+        # ── 模式4: 【字段】值 ──
+        m = re.search(r'【' + re.escape(field_clean) + r'】\s*(.+?)(?:[,，。.;；\|]|$)', line)
+        if m:
+            val = m.group(1).strip()
+            if val and len(val) < 100:
+                found.append(val)
+                continue
+
+        # ── 模式5: 逗号分隔键值对 ──
+        # 课程性质,专业必修课  (在CSV或简单格式中)
+        m = re.search(re.escape(field_clean) + r'[,，]\s*([^,，\n]+)', line)
+        if m:
+            val = m.group(1).strip().rstrip('，。,.;；')
+            if val and len(val) < 100 and val != field_clean:
+                found.append(val)
+                continue
+
+    return found
+
+
 @tool
 def parse_knowledge_file(file_description: str, file_content: str, missing_fields: str) -> str:
     """
@@ -113,7 +200,7 @@ def parse_knowledge_file(file_description: str, file_content: str, missing_field
     ctx = request_context.get() or new_context(method="parse_knowledge_file")
 
     fields = [f.strip() for f in missing_fields.split(',') if f.strip()]
-    content = file_content[:3000]  # 限制长度
+    content = file_content[:5000]  # 扩大到5000字符
 
     result = {
         "file": file_description,
@@ -122,29 +209,9 @@ def parse_knowledge_file(file_description: str, file_content: str, missing_field
         "summary": f"已从文件中搜索以下字段：{', '.join(fields)}"
     }
 
-    # 简单的关键词匹配提取
+    # 使用增强的智能匹配提取
     for field in fields:
-        # 尝试多种模式匹配
-        patterns = [
-            f"{field}：", f"{field}:", f"{field}＝", f"{field}=",
-            f"{field}：", f"【{field}】", f"{field}是",
-        ]
-        found = []
-        for line in content.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-            for pattern in patterns:
-                if pattern in line:
-                    # 提取冒号/等号后面的值
-                    for sep in ['：', ':', '＝', '=', '是']:
-                        if sep in line:
-                            val = line.split(sep, 1)[1].strip().rstrip('，。,.')
-                            if val and len(val) < 100:
-                                found.append(val)
-                            break
-                    break
-
+        found = _find_field_in_text(field, content)
         if found:
             # 去重
             unique = list(dict.fromkeys(found))
