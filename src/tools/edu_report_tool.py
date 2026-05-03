@@ -1,509 +1,780 @@
-"""高校教务文档生成工具 - 自动识别模板 + 动态填充（简化版）
-
-核心能力:
-1. 自动解析任意Word模板，识别所有可填充字段
-2. 支持两种字段模式填充：冒号追加模式和标签格+空白格设置模式
-3. 行组填充：处理含vMerge的合并单元格行组
-4. 支持多模板，通过template_name参数选择
 """
-
+教务报告生成工具 - 核心逻辑
+"""
 import os
-import io
-import re
 import json
-import logging
 import copy
-from datetime import datetime
+import re
+import tempfile
+from typing import Optional
 
 from docx import Document
 from docx.oxml.ns import qn
 from langchain.tools import tool
-from coze_coding_dev_sdk.s3 import S3SyncStorage
+
 from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import new_context
+from storage.memory.memory_saver import get_memory_saver
+
 from tools.template_analyzer import analyze_template
 
-logger = logging.getLogger(__name__)
 
-_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-
-# 模板注册表：key=模板名称, value=文件路径
+# ── 模板注册表 ──
 TEMPLATE_REGISTRY = {
     "评价报告": "assets/2023-2024-2《xxx》 岭南师范学院专业课程目标达成度评价报告模板.docx",
     "试卷分析": "assets/2023-2024-2《xxx》 试卷分析模板.docx",
     "关联矩阵": "assets/2023-2024-2《xxx》岭南师范学院考题与课程目标及毕业要求关联矩阵表模板.docx",
 }
 
-# 行组复杂度阈值：列数超过此值视为复杂行组，跳过填充
+# 复杂行组最大列数阈值
 _MAX_SIMPLE_GROUP_COLS = 15
 
-# S3 客户端
-_s3_storage = None
+
+def _get_template_path(name: str) -> str:
+    workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    file = TEMPLATE_REGISTRY.get(name)
+    if not file:
+        avail = ", ".join(TEMPLATE_REGISTRY.keys())
+        raise ValueError(f"未找到模板'{name}'，可用模板: [{avail}]")
+    return os.path.join(workspace, file)
 
 
-def _get_s3_storage() -> S3SyncStorage:
-    global _s3_storage
-    if _s3_storage is None:
-        _s3_storage = S3SyncStorage(
+# ── 单元格操作 ──
+
+def _get_unique_cells(row):
+    """获取行中的独立单元格（通过XML元素去重）。"""
+    seen = set()
+    unique = []
+    for cell in row.cells:
+        cid = id(cell._element)
+        if cid not in seen:
+            seen.add(cid)
+            unique.append(cell)
+    return unique
+
+
+def _is_vmerge_continue(cell) -> bool:
+    """判断单元格是否为 vMerge=continue（延续格）。"""
+    tc = cell._element
+    tcPr = tc.find(qn("w:tcPr"))
+    if tcPr is not None:
+        vm = tcPr.find(qn("w:vMerge"))
+        if vm is not None:
+            val = vm.get(qn("w:val"))
+            if val is None or val == "":
+                return True
+    return False
+
+
+def _is_vmerge_restart(cell) -> bool:
+    """判断单元格是否为 vMerge=restart。"""
+    tc = cell._element
+    tcPr = tc.find(qn("w:tcPr"))
+    if tcPr is not None:
+        vm = tcPr.find(qn("w:vMerge"))
+        if vm is not None:
+            val = vm.get(qn("w:val"))
+            if val == "restart":
+                return True
+    return False
+
+
+def _set_tc_text(tc, text: str):
+    """直接在tc元素上设置文本（清空后写入）。"""
+    for p in tc.findall(qn("w:p")):
+        for r in list(p.findall(qn("w:r"))):
+            p.remove(r)
+    paragraphs = tc.findall(qn("w:p"))
+    if paragraphs:
+        r_elem = paragraphs[0].makeelement(qn("w:r"), {})
+        t_elem = r_elem.makeelement(qn("w:t"), {})
+        t_elem.text = str(text)
+        r_elem.append(t_elem)
+        paragraphs[0].append(r_elem)
+
+
+def _set_cell_text(cell, text: str):
+    """设置单元格文本（清空后写入）。"""
+    _set_tc_text(cell._element, text)
+
+
+def _append_value_to_tc_after_label(tc, label: str, value: str):
+    """在tc元素中，在label后追加value。"""
+    for p in tc.findall(qn("w:p")):
+        for r in p.findall(qn("w:r")):
+            for t in r.findall(qn("w:t")):
+                if t.text and label in t.text:
+                    t.text = t.text.replace(label, f"{label}{value}", 1)
+                    return True
+    # 如果没找到label，直接追加
+    paragraphs = tc.findall(qn("w:p"))
+    if paragraphs:
+        r_elem = paragraphs[0].makeelement(qn("w:r"), {})
+        t_elem = r_elem.makeelement(qn("w:t"), {})
+        t_elem.text = value
+        r_elem.append(t_elem)
+        paragraphs[0].append(r_elem)
+        return True
+    return False
+
+
+def _add_table_row_after(table, after_row_idx):
+    """在指定行后复制一行（用于行组填充）。"""
+    src_row = table.rows[after_row_idx]
+    new_tr = copy.deepcopy(src_row._tr)
+    after_row_idx + 1  # noqa
+    src_row._tr.addnext(new_tr)
+    return new_tr
+
+
+# ── 选项词集合 ──
+_OPTION_WORDS_SET = frozenset({
+    "选修", "必修", "开卷", "闭卷", "是", "否",
+    "试题库", "试卷库", "教师组题", "本人阅卷", "同行阅卷",
+    "集体阅卷", "机器阅卷", "其他",
+})
+
+
+# ── 勾选框行检测和填充 ──
+
+def _detect_checkbox_row(unique_cells):
+    """检测一行是否是勾选框行，返回标签组列表。
+    
+    勾选框行模式: [行标签] [选项1] [空白1] [选项2] [空白2] ... [行标签2] [选项3] [空白3] ...
+    返回: [{"label": 行标签, "option_blanks": {选项文字: 空白格索引}}, ...]
+    """
+    groups = []
+    current_label = None
+    current_options = {}
+    
+    for ci in range(len(unique_cells) - 1):
+        cell_text = unique_cells[ci].text.strip()
+        next_text = unique_cells[ci + 1].text.strip()
+        
+        if cell_text in _OPTION_WORDS_SET and not next_text:
+            # 找到选项+空白格对
+            current_options[cell_text] = ci + 1
+        elif cell_text and cell_text not in _OPTION_WORDS_SET and not _is_vmerge_continue(unique_cells[ci]):
+            # 遇到非选项标签文字
+            # 如果当前组已有选项，先保存
+            if current_options and current_label:
+                groups.append({"label": current_label, "option_blanks": current_options})
+            current_label = cell_text
+            current_options = {}
+    
+    # 保存最后一组
+    if current_options and current_label:
+        groups.append({"label": current_label, "option_blanks": current_options})
+    
+    return groups
+
+
+def _fill_checkbox_row(unique_cells, group, user_value):
+    """根据用户值在勾选框组打√。
+    
+    user_value: 如 "必修" 或 "闭卷" （单选）
+    """
+    selected = [v.strip() for v in user_value.replace("，", ",").split(",")]
+    option_blanks = group["option_blanks"]
+    
+    for opt_text, blank_idx in option_blanks.items():
+        if opt_text in selected:
+            _set_cell_text(unique_cells[blank_idx], "√")
+        # 未选中的空白格保持空白
+
+
+# ── 标签字段填充 ──
+
+def _fill_label_fields(doc, label_fields, data):
+    """填充标签字段，支持多种填充模式。"""
+    for f in label_fields:
+        label = f["label"]
+        if label not in data:
+            continue
+        value = data[label]
+        fill_mode = f.get("fill_mode", "append")
+        pattern = f.get("pattern", "colon")
+        
+        for ri in f["row_indices"]:
+            t_idx = f["table_idx"]
+            table = doc.tables[t_idx]
+            
+            if fill_mode == "set":
+                # 标签格+空白格模式：直接设置空白格内容
+                col_idx = f["col_idx"]
+                # 用tr级别获取tc
+                tr = table.rows[ri]._tr
+                tcs = tr.findall(qn("w:tc"))
+                if col_idx < len(tcs):
+                    _set_tc_text(tcs[col_idx], str(value))
+            
+            elif fill_mode == "replace":
+                # 占位符替换模式：清空格内容后写入新值
+                col_idx = f["col_idx"]
+                tr = table.rows[ri]._tr
+                tcs = tr.findall(qn("w:tc"))
+                if col_idx < len(tcs):
+                    _set_tc_text(tcs[col_idx], str(value))
+            
+            elif fill_mode == "append":
+                # 冒号模式：在标签后追加值
+                col_idx = f["col_idx"]
+                tr = table.rows[ri]._tr
+                tcs = tr.findall(qn("w:tc"))
+                if col_idx < len(tcs):
+                    _append_value_to_tc_after_label(tcs[col_idx], label, str(value))
+
+
+def _fill_checkbox_rows_in_table(doc, analysis, data):
+    """扫描所有表格行，检测勾选框行并填充。"""
+    for t_idx, table in enumerate(doc.tables):
+        for ri, row in enumerate(table.rows):
+            unique = _get_unique_cells(row)
+            groups = _detect_checkbox_row(unique)
+            
+            if not groups:
+                continue
+            
+            # 对每个标签组，查找data中对应的值并填充
+            for group in groups:
+                row_label = group["label"]
+                user_value = None
+                
+                # 1. 精确匹配
+                if row_label in data:
+                    user_value = data[row_label]
+                else:
+                    # 2. 模糊匹配
+                    clean_label = row_label.replace("\n", "").replace(" ", "")
+                    for key in data:
+                        clean_key = key.replace("\n", "").replace(" ", "")
+                        if clean_key == clean_label:
+                            user_value = data[key]
+                            break
+                
+                # 3. 检查选项本身是否在data中
+                if user_value is None:
+                    for opt in group["option_blanks"]:
+                        if opt in data:
+                            user_value = data[opt]
+                            break
+                
+                if user_value is not None:
+                    _fill_checkbox_row(unique, group, user_value)
+
+
+def _fill_simple_row_groups(doc, groups, data):
+    """填充简单行组（重复行数据）。"""
+    for g in groups:
+        gid = g["group_id"]
+        if gid not in data:
+            continue
+        
+        row_data_list = data[gid]
+        if not isinstance(row_data_list, list):
+            continue
+        
+        table = doc.tables[g["table_idx"]]
+        start_row = g["start_row"]
+        template_row_count = g["template_row_count"]
+        
+        # 填充模板行
+        for row_offset, row_data in enumerate(row_data_list):
+            if row_offset >= template_row_count:
+                break
+            actual_row = start_row + row_offset
+            
+            # 使用tr级别的tc元素
+            tr = table.rows[actual_row]._tr
+            tcs = tr.findall(qn("w:tc"))
+            
+            data_idx = 0
+            for ti, tc in enumerate(tcs):
+                if data_idx >= len(row_data):
+                    break
+                
+                # 检查vMerge
+                tcPr = tc.find(qn("w:tcPr"))
+                if tcPr is not None:
+                    vm = tcPr.find(qn("w:vMerge"))
+                    if vm is not None:
+                        val = vm.get(qn("w:val"))
+                        if val is None or val == "":
+                            # vMerge=continue：消耗数据但不填值
+                            data_idx += 1
+                            continue
+                
+                # 获取格内文本
+                all_text = []
+                for p in tc.findall(qn("w:p")):
+                    for r in p.findall(qn("w:r")):
+                        for t in r.findall(qn("w:t")):
+                            if t.text:
+                                all_text.append(t.text)
+                text = "".join(all_text).strip()
+                
+                # 空白格或占位符格：填入数据
+                if not text or text in ("%", "…", "……"):
+                    _set_tc_text(tc, str(row_data[data_idx]))
+                    data_idx += 1
+                else:
+                    # 有文字的格：如果不是标签则跳过
+                    pass
+        
+        # 如果数据行数 > 模板行数，需要复制行
+        if len(row_data_list) > template_row_count:
+            for extra_idx in range(template_row_count, len(row_data_list)):
+                # 复制最后一行
+                last_row = table.rows[start_row + template_row_count - 1]
+                new_tr = copy.deepcopy(last_row._tr)
+                last_row._tr.addnext(new_tr)
+                
+                # 填充新行
+                tcs = new_tr.findall(qn("w:tc"))
+                row_data = row_data_list[extra_idx]
+                data_idx = 0
+                for ti, tc in enumerate(tcs):
+                    if data_idx >= len(row_data):
+                        break
+                    tcPr = tc.find(qn("w:tcPr"))
+                    if tcPr is not None:
+                        vm = tcPr.find(qn("w:vMerge"))
+                        if vm is not None:
+                            val = vm.get(qn("w:val"))
+                            if val is None or val == "":
+                                data_idx += 1
+                                continue
+                    all_text = []
+                    for p in tc.findall(qn("w:p")):
+                        for r in p.findall(qn("w:r")):
+                            for t in r.findall(qn("w:t")):
+                                if t.text:
+                                    all_text.append(t.text)
+                    text = "".join(all_text).strip()
+                    if not text or text in ("%", "…", "……"):
+                        _set_tc_text(tc, str(row_data[data_idx]))
+                        data_idx += 1
+
+
+# ── 用户字段简化 ──
+
+def _simplify_fields(label_fields):
+    """将内部字段列表简化为用户友好的字段列表。
+    
+    将 _第1列 等子字段归组到基础字段下。
+    """
+    # 子字段后缀列表
+    sub_suffixes = ["_第1列", "_第2列", "_第3列", "_第4列", "_第5列",
+                    "_一题", "_二题", "_三题", "_四题", "_五题",
+                    "_六题", "_七题", "_八题", "_九题",
+                    "_<60", "_60-69", "_70-79", "_80-89", "_90-100",
+                    "_应到", "_实到", "_缺考", "_缓考", "_作弊", "_取消考试资格"]
+    
+    groups = {}  # base_label → {"type": "single"/"group", ...}
+    field_order = []
+    
+    for f in label_fields:
+        label = f["label"]
+        
+        base = None
+        suffix = None
+        for s in sub_suffixes:
+            if label.endswith(s):
+                base = label[:-len(s)]
+                suffix = s[1:]
+                break
+        
+        if base and suffix:
+            if base in groups and groups[base]["type"] == "group":
+                # 追加到已有组
+                groups[base]["sub_labels"].append(suffix)
+                groups[base]["sub_fields"].append(f)
+            elif base in groups and groups[base]["type"] == "single":
+                # 升级为group
+                existing = groups[base]["field"]
+                groups[base] = {
+                    "type": "group",
+                    "base_label": base,
+                    "sub_fields": [existing, f],
+                    "sub_labels": [base, suffix],
+                }
+            else:
+                if base not in groups:
+                    field_order.append(base)
+                groups[base] = {
+                    "type": "group",
+                    "base_label": base,
+                    "sub_fields": [f],
+                    "sub_labels": [suffix],
+                }
+        else:
+            if label not in groups:
+                field_order.append(label)
+                groups[label] = {
+                    "type": "single",
+                    "base_label": label,
+                    "field": f,
+                }
+    
+    user_fields = []
+    for label in field_order:
+        g = groups[label]
+        if g["type"] == "single":
+            f = g["field"]
+            user_fields.append({
+                "label": f["label"],
+                "description": f.get("description", f"请填写{f['label']}"),
+                "fill_mode": f["fill_mode"],
+            })
+        else:
+            # 分组字段 - 检查是否需要拆分考勤数据
+            subs = g["sub_labels"]
+            base = g["base_label"]
+            
+            # 检查是否包含考勤子字段
+            attendance_suffixes = {"应到", "实到", "缺考", "缓考", "作弊", "取消考试资格"}
+            has_attendance = any(s in attendance_suffixes for s in subs)
+            
+            if has_attendance and base != "考勤":
+                # 拆分：base字段 + 考勤组
+                # 先添加base字段，跳过"_第N列"等内部子字段
+                internal_suffixes = {"第1列", "第2列", "第3列", "第4列", "第5列"}
+                base_fields = [sf for sf in g["sub_fields"] 
+                              if not any(sf["label"].endswith(f"_{s}") for s in attendance_suffixes)
+                              and not any(sf["label"].endswith(f"_{s}") for s in internal_suffixes)]
+                for sf in base_fields:
+                    user_fields.append({
+                        "label": sf["label"],
+                        "description": sf.get("description", f"请填写{sf['label']}"),
+                        "fill_mode": sf["fill_mode"],
+                    })
+                # 添加考勤组
+                att_labels = [s for s in subs if s in attendance_suffixes]
+                if att_labels:
+                    user_fields.append({
+                        "label": "考勤数据",
+                        "description": "请填写考勤数据：应到、实到、缺考、缓考、作弊、取消考试资格人数",
+                        "fill_mode": "group",
+                        "sub_labels": att_labels,
+                    })
+            else:
+                user_fields.append({
+                    "label": base,
+                    "description": f"请填写{base}的相关数据",
+                    "fill_mode": "group",
+                    "sub_labels": subs,
+                })
+    
+    return user_fields
+
+
+# ── 数据扩展 ──
+
+def _expand_report_data(template_path: str, user_data: dict) -> dict:
+    """将用户友好的字段数据扩展为完整的内部字段数据。
+    
+    处理逻辑：
+    1. 逗号分隔的分组字段（如"及百分比": "15,15,20,..."）自动展开为子字段
+    2. 勾选框字段（如"课程性质": "必修"）由_fill_checkbox_rows_in_table处理，此处原样保留
+    3. 考勤数据自动映射到子字段
+    4. 分数段比例自动计算（如果用户未提供）
+    """
+    analysis = analyze_template(template_path)
+    label_fields = analysis["label_fields"]
+    
+    # 构建基础名→子字段映射
+    sub_suffixes = ["_第1列", "_第2列", "_第3列", "_第4列", "_第5列",
+                    "_一题", "_二题", "_三题", "_四题", "_五题",
+                    "_六题", "_七题", "_八题", "_九题",
+                    "_<60", "_60-69", "_70-79", "_80-89", "_90-100",
+                    "_应到", "_实到", "_缺考", "_缓考", "_作弊", "_取消考试资格"]
+    
+    base_to_subs = {}
+    for f in label_fields:
+        label = f["label"]
+        for s in sub_suffixes:
+            if label.endswith(s):
+                base = label[:-len(s)]
+                if base not in base_to_subs:
+                    base_to_subs[base] = []
+                base_to_subs[base].append({"full_label": label, "suffix": s[1:], "field": f})
+                break
+    
+    expanded = {}
+    
+    # 考勤子字段名映射
+    attendance_suffixes = {"应到", "实到", "缺考", "缓考", "作弊", "取消考试资格"}
+    
+    # 先处理独立的考勤字段（应到=45, 实到=43等），映射到full_label
+    for key, value in list(user_data.items()):
+        if key in attendance_suffixes:
+            # 找到匹配的full_label（如 学生班级_应到）
+            for base_name, subs in base_to_subs.items():
+                for sub in subs:
+                    if sub["suffix"] == key:
+                        expanded[sub["full_label"]] = str(value)
+                        if key in user_data:
+                            del user_data[key]  # 已处理，避免重复
+    
+    for key, value in user_data.items():
+        if key == "考勤数据":
+            # 处理考勤数据组
+            if isinstance(value, dict):
+                for att_key, att_val in value.items():
+                    # 查找匹配的考勤子字段
+                    for base_name, subs in base_to_subs.items():
+                        for sub in subs:
+                            if sub["suffix"] == att_key:
+                                expanded[sub["full_label"]] = str(att_val)
+            elif isinstance(value, str) and "," in value:
+                # 逗号分隔格式：应到,实到,缺考,缓考,作弊,取消资格
+                parts = [p.strip() for p in value.split(",")]
+                # 按考勤子字段的顺序映射
+                for base_name, subs in base_to_subs.items():
+                    att_subs = [s for s in subs if s["suffix"] in attendance_suffixes]
+                    att_subs.sort(key=lambda s: ["应到", "实到", "缺考", "缓考", "作弊", "取消考试资格"].index(s["suffix"]))
+                    for i, sub in enumerate(att_subs):
+                        if i < len(parts):
+                            expanded[sub["full_label"]] = parts[i]
+            continue
+        
+        if key in base_to_subs:
+            subs = base_to_subs[key]
+            # 检查是否包含考勤子字段
+            has_attendance = any(s["suffix"] in attendance_suffixes for s in subs)
+            
+            if has_attendance:
+                # 拆分：先填非考勤子字段，考勤数据另存
+                non_att_subs = [s for s in subs if s["suffix"] not in attendance_suffixes]
+                if isinstance(value, str) and "," in value and non_att_subs:
+                    parts = [p.strip() for p in value.split(",")]
+                    for i, sub in enumerate(non_att_subs):
+                        if i < len(parts):
+                            expanded[sub["full_label"]] = parts[i]
+                else:
+                    expanded[key] = value
+            elif isinstance(value, list) and len(value) == len(subs):
+                # 列表值，按顺序映射
+                for i, sub in enumerate(subs):
+                    expanded[sub["full_label"]] = value[i]
+            elif isinstance(value, str) and "," in value:
+                # 逗号分隔值，按顺序映射到子字段
+                parts = [p.strip() for p in value.split(",")]
+                for i, sub in enumerate(subs):
+                    if i < len(parts):
+                        expanded[sub["full_label"]] = parts[i]
+            else:
+                # 单个值，保留原样（勾选框逻辑由_fill_checkbox_rows_in_table处理）
+                expanded[key] = value
+        else:
+            # 直接字段，原样保留
+            expanded[key] = value
+    
+    # 自动计算分数段比例（如果用户未提供但有分数段人数）
+    dist_bases = [b for b in base_to_subs if b.startswith("分数分布")]
+    for base_name in dist_bases:
+        subs = base_to_subs[base_name]
+        ratio_subs = [s for s in subs if s["suffix"].startswith("第")]
+        count_subs = [s for s in subs if s["suffix"] in ["<60", "60-69", "70-79", "80-89", "90-100"]]
+        
+        if ratio_subs and count_subs:
+            # 检查是否已有比例数据
+            has_ratio = any(s["full_label"] in expanded for s in ratio_subs)
+            if not has_ratio:
+                # 计算比例
+                total = 0
+                counts = []
+                for s in count_subs:
+                    v = expanded.get(s["full_label"], "0")
+                    try:
+                        n = float(v)
+                    except (ValueError, TypeError):
+                        n = 0
+                    counts.append(n)
+                    total += n
+                
+                if total > 0:
+                    for i, s in enumerate(ratio_subs):
+                        if i < len(counts):
+                            pct = counts[i] / total * 100
+                            expanded[s["full_label"]] = f"{pct:.1f}%"
+    
+    return expanded
+
+
+# ── 主生成函数 ──
+
+def _build_report_docx(template_path: str, user_data: dict) -> bytes:
+    """根据模板和用户数据生成填充后的docx文件。"""
+    analysis = analyze_template(template_path)
+    doc = Document(template_path)
+    
+    # 1. 扩展用户数据
+    expanded_data = _expand_report_data(template_path, user_data)
+    
+    # 2. 识别勾选框行，排除与勾选框冲突的标签字段
+    checkbox_rows = set()  # {(table_idx, row_idx)}
+    for t_idx, table in enumerate(doc.tables):
+        for r_idx, row in enumerate(table.rows):
+            unique = _get_unique_cells(row)
+            groups = _detect_checkbox_row(unique)
+            if groups:
+                checkbox_rows.add((t_idx, r_idx))
+    
+    # 构建勾选框空白格的位置集合 (table_idx, row_idx, col_idx)
+    checkbox_blank_cells = set()
+    for t_idx, table in enumerate(doc.tables):
+        for r_idx, row in enumerate(table.rows):
+            unique = _get_unique_cells(row)
+            groups = _detect_checkbox_row(unique)
+            for g in groups:
+                for ci in g["option_blanks"].values():
+                    checkbox_blank_cells.add((t_idx, r_idx, ci))
+
+    # 过滤掉勾选框空白格位置的label字段（避免重复填充冲突）
+    # 但保留勾选框行中非空白格位置的label字段（如"教师姓名"）
+    filtered_fields = []
+    for f in analysis["label_fields"]:
+        t_idx = f["table_idx"]
+        skip = False
+        for r_idx in f["row_indices"]:
+            if (t_idx, r_idx, f["col_idx"]) in checkbox_blank_cells:
+                skip = True
+                break
+        if not skip:
+            filtered_fields.append(f)
+    
+    # 3. 填充标签字段（不含勾选框行）
+    _fill_label_fields(doc, filtered_fields, expanded_data)
+    
+    # 4. 填充勾选框行（独立于标签字段，智能识别选项+空白格模式）
+    _fill_checkbox_rows_in_table(doc, analysis, expanded_data)
+    
+    # 5. 填充行组
+    _fill_simple_row_groups(doc, analysis["row_groups"], expanded_data)
+    
+    # 保存到临时文件
+    tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    doc.save(tmp.name)
+    tmp.seek(0)
+    content = tmp.read()
+    tmp.close()
+    os.unlink(tmp.name)
+    
+    return content
+
+
+# ── 工具函数 ──
+
+@tool
+def list_templates() -> str:
+    """列出所有可用的教务报告模板。"""
+    templates = []
+    for name, path in TEMPLATE_REGISTRY.items():
+        templates.append({"name": name, "file": os.path.basename(path)})
+    return json.dumps({"success": True, "templates": templates}, ensure_ascii=False)
+
+
+@tool
+def analyze_report_template(template_name: str) -> str:
+    """解析指定模板，返回用户友好的字段清单和信息收集指引。
+    在开始收集用户信息前必须先调用此工具。
+
+    Args:
+        template_name: 模板名称，从list_templates返回的名称中选择
+    """
+    try:
+        path = _get_template_path(template_name)
+        analysis = analyze_template(path)
+        
+        # 简化字段列表
+        user_fields = _simplify_fields(analysis["label_fields"])
+        
+        # 构建收集指引
+        guide_parts = []
+        guide_parts.append(f"模板【{template_name}】共需填写 {len(user_fields)} 项信息：\n")
+        
+        for i, f in enumerate(user_fields, 1):
+            if f["fill_mode"] == "group":
+                subs = f.get("sub_labels", [])
+                if len(subs) <= 5:
+                    guide_parts.append(f"  {i}. {f['label']}（{', '.join(subs)}）")
+                else:
+                    guide_parts.append(f"  {i}. {f['label']}（共{len(subs)}项，可用逗号分隔）")
+            else:
+                guide_parts.append(f"  {i}. {f['label']}")
+        
+        guide_parts.append('\n提示：多值字段可用逗号分隔一次性提供，如"及百分比: 15,15,20,20,10,10,5,5,0"')
+        
+        return json.dumps({
+            "success": True,
+            "template_name": template_name,
+            "total_fields": len(user_fields),
+            "user_fields": user_fields,
+            "row_groups_count": analysis["summary"]["total_row_groups"],
+            "collection_guide": "\n".join(guide_parts),
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"模板解析失败: {e}"}, ensure_ascii=False)
+
+
+@tool
+def generate_edu_report(template_name: str, report_data: str) -> str:
+    """根据模板和用户数据生成教务报告文档。
+
+    Args:
+        template_name: 模板名称（评价报告/试卷分析/关联矩阵）
+        report_data: JSON格式的报告数据，键为字段名，值为字段值。
+                     多值字段用逗号分隔，如 {"及百分比": "15,15,20,20,10,10,5,5,0"}
+                     行组数据用二维数组，如 {"T0_G0": [["值1","值2"],...]}
+    """
+    ctx = request_context.get() or new_context(method="generate_edu_report")
+    
+    try:
+        path = _get_template_path(template_name)
+        
+        # 解析报告数据
+        if isinstance(report_data, str):
+            data = json.loads(report_data)
+        else:
+            data = report_data
+        
+        # 生成文档
+        docx_bytes = _build_report_docx(path, data)
+        
+        # 上传到对象存储
+        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        import time
+        
+        storage = S3SyncStorage(
             endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
             access_key="",
             secret_key="",
             bucket_name=os.getenv("COZE_BUCKET_NAME"),
             region="cn-beijing",
         )
-    return _s3_storage
-
-
-def _get_template_path(template_name: str) -> str:
-    """根据名称获取模板绝对路径"""
-    rel_path = TEMPLATE_REGISTRY.get(template_name)
-    if not rel_path:
-        raise ValueError(f"未找到模板'{template_name}'，可用模板: {list(TEMPLATE_REGISTRY.keys())}")
-    return os.path.join(os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"), rel_path)
-
-
-# ──────────────────── 单元格操作基础函数 ────────────────────
-
-def _get_tr_cells(row) -> list:
-    """从row._tr获取真正属于这一行的tc元素列表。
-    
-    注意：不能用 row.cells 或 _get_unique_cells，因为python-docx对合并单元格的处理
-    会导致不同行的cell指向同一个XML元素（vMerge=continue格与restart格共享元素）。
-    _get_tr_cells 直接遍历 tr 下的 tc 子元素，保证每行获取的元素是独立的。
-    """
-    return row._tr.findall(qn("w:tc"))
-
-
-def _get_tc_text(tc) -> str:
-    """获取tc元素的文本内容"""
-    texts = []
-    for p in tc.findall(qn("w:p")):
-        for r in p.findall(qn("w:r")):
-            for t in r.findall(qn("w:t")):
-                if t.text:
-                    texts.append(t.text)
-    return "".join(texts).strip()
-
-
-def _is_tc_vmerge_continue(tc) -> bool:
-    """判断tc元素是否是垂直合并延续格（vMerge=continue，无val属性）"""
-    tcPr = tc.find(qn("w:tcPr"))
-    if tcPr is not None:
-        vm = tcPr.find(qn("w:vMerge"))
-        if vm is not None:
-            val = vm.get(qn("w:val"))
-            # val=None 表示continue, val="continue"也表示continue
-            # val="restart" 表示起始格
-            return val is None or val == "continue"
-    return False
-
-
-def _is_tc_vmerge_restart(tc) -> bool:
-    """判断tc元素是否是垂直合并起始格（vMerge=restart）"""
-    tcPr = tc.find(qn("w:tcPr"))
-    if tcPr is not None:
-        vm = tcPr.find(qn("w:vMerge"))
-        if vm is not None:
-            val = vm.get(qn("w:val"))
-            return val == "restart"
-    return False
-
-
-def _get_unique_cells(row) -> list:
-    """获取行中的独立单元格（python-docx Cell对象），用于标签字段定位。
-    
-    注意：此函数返回的Cell对象可能被合并单元格的vMerge影响，
-    在填充行组数据时不应使用此函数，应使用 _get_tr_cells。
-    """
-    seen = set()
-    cells = []
-    for cell in row.cells:
-        cid = id(cell._element)
-        if cid not in seen:
-            seen.add(cid)
-            cells.append(cell)
-    return cells
-
-
-def _is_vmerge_continue(cell) -> bool:
-    """判断Cell对象是否是垂直合并延续格"""
-    return _is_tc_vmerge_continue(cell._element)
-
-
-# ──────────────────── 填充函数 ────────────────────
-
-def _append_after_label(cell, label: str, value: str):
-    """在单元格中找到含 label 且以冒号结尾的 run，在其后追加同格式 run"""
-    for para in cell.paragraphs:
-        for run in para.runs:
-            if label in run.text and run.text.strip().endswith(('：', ':')):
-                new_run_elem = copy.deepcopy(run._element)
-                for t_elem in new_run_elem.findall(qn("w:t")):
-                    t_elem.text = value
-                run._element.addnext(new_run_elem)
-                return True
-    return False
-
-
-def _set_tc_text(tc, text: str):
-    """清空tc元素内容，设置新文本。操作XML层级，不受python-docx合并单元格影响。"""
-    # 清空所有段落中的run
-    for p in tc.findall(qn("w:p")):
-        for r in list(p.findall(qn("w:r"))):
-            p.remove(r)
-    # 移除多余段落，只保留第一个
-    paragraphs = tc.findall(qn("w:p"))
-    for p in paragraphs[1:]:
-        tc.remove(p)
-    
-    # 在第一个段落中添加run
-    if paragraphs:
-        first_p = paragraphs[0]
-    else:
-        first_p = tc.makeelement(qn("w:p"), {})
-        tc.append(first_p)
-    
-    # 创建run
-    r_elem = first_p.makeelement(qn("w:r"), {})
-    # 创建rPr（字体设置）
-    rPr = r_elem.makeelement(qn("w:rPr"), {})
-    rFonts = rPr.makeelement(qn("w:rFonts"), {
-        qn("w:ascii"): "FangSong_GB2312",
-        qn("w:hAnsi"): "FangSong_GB2312",
-        qn("w:eastAsia"): "FangSong_GB2312",
-    })
-    rPr.append(rFonts)
-    r_elem.append(rPr)
-    
-    # 创建文本元素
-    t_elem = r_elem.makeelement(qn("w:t"), {})
-    t_elem.text = text
-    r_elem.append(t_elem)
-    
-    first_p.append(r_elem)
-
-
-def _set_cell_text(cell, text: str):
-    """清空单元格内容，设置新文本（通过Cell对象操作）"""
-    if not cell.paragraphs:
-        return
-    for para in cell.paragraphs:
-        for run in list(para.runs):
-            run._element.getparent().remove(run._element)
-    for para in cell.paragraphs[1:]:
-        para._element.getparent().remove(para._element)
-    new_run = cell.paragraphs[0].add_run(text)
-    new_run.font.name = "FangSong_GB2312"
-    new_run._element.rPr.rFonts.set(qn("w:eastAsia"), "FangSong_GB2312")
-
-
-def _add_table_row_after(table, after_row_idx: int):
-    """深拷贝模板行，清空文本后插入"""
-    src_tr = table.rows[after_row_idx]._element
-    new_tr = copy.deepcopy(src_tr)
-    for tc in new_tr.findall(qn("w:tc")):
-        for p in tc.findall(qn("w:p")):
-            for r in p.findall(qn("w:r")):
-                for t in r.findall(qn("w:t")):
-                    t.text = ""
-    src_tr.addnext(new_tr)
-
-
-def _fill_label_fields(doc, analysis: dict, data: dict):
-    """填充标签字段。支持三种模式：
-    - fill_mode="append"：在"标签："后追加用户值（冒号模式）
-    - fill_mode="set"：直接设置空白格内容（标签格+空白格模式）
-    - fill_mode="replace"：清空格内容后设置新值（替换占位符模式，如%→实际值）
-    跳过行组覆盖区域。
-    """
-    row_groups = analysis["row_groups"]
-
-    def _in_row_group(t_idx, r_idx):
-        for g in row_groups:
-            if g["table_idx"] == t_idx and g["start_row"] <= r_idx < g["start_row"] + g["template_row_count"]:
-                return True
-        return False
-
-    for field_info in analysis["label_fields"]:
-        label = field_info["label"]
-        value = data.get(label, "")
-        if not value:
-            continue
-
-        t_idx = field_info["table_idx"]
-        table = doc.tables[t_idx]
-        fill_mode = field_info.get("fill_mode", "append")
-        row_indices = [r for r in field_info["row_indices"] if not _in_row_group(t_idx, r)]
-
-        if not row_indices:
-            continue
-
-        def _fill_cell(cell, val, mode):
-            if mode == "replace":
-                _set_cell_text(cell, str(val))
-            elif mode == "set":
-                _set_cell_text(cell, str(val))
-            else:
-                _append_after_label(cell, label, val)
-
-        if isinstance(value, list):
-            for i, row_idx in enumerate(row_indices):
-                if i < len(value):
-                    unique = _get_unique_cells(table.rows[row_idx])
-                    col_idx = field_info["col_idx"]
-                    if col_idx < len(unique):
-                        _fill_cell(unique[col_idx], value[i], fill_mode)
-        else:
-            row_idx = row_indices[0]
-            unique = _get_unique_cells(table.rows[row_idx])
-            col_idx = field_info["col_idx"]
-            if col_idx < len(unique):
-                _fill_cell(unique[col_idx], value, fill_mode)
-
-
-def _fill_simple_row_groups(doc, analysis: dict, data: dict):
-    """填充简单行组：只处理列数<=阈值且无复杂合并的行组。
-    
-    关键改进：使用 _get_tr_cells 直接获取每行的tc元素，避免python-docx
-    合并单元格共享XML元素导致的填充错位问题。
-    
-    策略：
-    - vMerge=continue 的格：跳过（它是上方restart格的延续，不能独立设值）
-    - vMerge=restart 的格：空白则填值，有文字则跳过
-    - 普通格：空白则填值，有冒号标签则追加，有固定标签则跳过
-    """
-    for group_info in analysis["row_groups"]:
-        group_id = group_info["group_id"]
-        col_count = len(group_info["column_labels"])
-
-        # 跳过复杂行组
-        if col_count > _MAX_SIMPLE_GROUP_COLS:
-            logger.info(f"跳过复杂行组 {group_id} ({col_count}列)")
-            continue
-
-        group_data = data.get(group_id, [])
-        if not group_data:
-            continue
-
-        t_idx = group_info["table_idx"]
-        table = doc.tables[t_idx]
-        start_row = group_info["start_row"]
-        template_count = group_info["template_row_count"]
-
-        # 扩展行
-        needed = len(group_data)
-        if needed > template_count:
-            last = start_row + template_count - 1
-            for i in range(needed - template_count):
-                _add_table_row_after(table, last + i)
-
-        # 填入数据：使用tr级别的tc元素，避免合并单元格问题
-        for row_offset, row_data in enumerate(group_data):
-            if row_offset >= needed:
-                break
-            actual_row = start_row + row_offset
-            if actual_row >= len(table.rows):
-                break
-            
-            # 使用 _get_tr_cells 获取真正属于该行的tc元素
-            tr_cells = _get_tr_cells(table.rows[actual_row])
-
-            data_idx = 0
-            for tc in tr_cells:
-                if data_idx >= len(row_data):
-                    break
-
-                text = _get_tc_text(tc).replace('\r', '')
-                
-                # vMerge=continue的格：它显示restart格的内容，不能独立设值
-                # 但用户数据中该列有值，需要消耗掉这个数据索引（丢弃）
-                # 因为Word中continue格自动显示restart格的内容
-                if _is_tc_vmerge_continue(tc):
-                    data_idx += 1  # 消耗数据但不填值
-                    continue
-
-                if not text:
-                    # 空白格（包括vMerge=restart但文本为空的格）→ 填值
-                    _set_tc_text(tc, str(row_data[data_idx]))
-                    data_idx += 1
-                else:
-                    # 含标签格：检查"标签："模式
-                    lines = [l.strip() for l in text.split('\n') if l.strip()]
-                    for line in lines:
-                        m = re.match(r'^(.+?)\s*[：:]\s*(.*)', line)
-                        if m and not m.group(2).strip():
-                            # "标签："后为空 → 需要追加值
-                            _append_value_to_tc_after_label(tc, m.group(1).strip(), str(row_data[data_idx]))
-                            data_idx += 1
-                        elif m and m.group(2).strip():
-                            # "标签：已有值" → 跳过
-                            data_idx += 1
-                        # 无冒号固定标签 → 不消费数据
-
-
-def _append_value_to_tc_after_label(tc, label: str, value: str):
-    """在tc元素中找到含label且以冒号结尾的run，在其后追加同格式run"""
-    for p in tc.findall(qn("w:p")):
-        for r in p.findall(qn("w:r")):
-            for t in r.findall(qn("w:t")):
-                if t.text and label in t.text and t.text.strip().endswith(('：', ':')):
-                    new_r = copy.deepcopy(r)
-                    for new_t in new_r.findall(qn("w:t")):
-                        new_t.text = value
-                    r.addnext(new_r)
-                    return
-
-
-def _fill_summary_section(doc, analysis: dict, data: dict):
-    """填充课程总结/改进措施等大段文本字段。
-    这些字段通常在表格末尾的大合并单元格中，标签后是空行区域。
-    """
-    for field_info in analysis["label_fields"]:
-        label = field_info["label"]
-        if label not in ("课程总结", "改进措施"):
-            continue
-        value = data.get(label, "")
-        if not value:
-            continue
-
-        t_idx = field_info["table_idx"]
-        table = doc.tables[t_idx]
-        for row_idx in field_info["row_indices"]:
-            if row_idx >= len(table.rows):
-                continue
-            unique = _get_unique_cells(table.rows[row_idx])
-            for cell in unique:
-                if label in cell.text:
-                    _append_after_label(cell, label, value)
-                    break
-
-
-def _build_report_docx(template_path: str, data: dict) -> bytes:
-    """基于模板 + 解析结果 + 用户数据，动态生成文档"""
-    analysis = analyze_template(template_path)
-    doc = Document(template_path)
-
-    _fill_label_fields(doc, analysis, data)
-    _fill_simple_row_groups(doc, analysis, data)
-    _fill_summary_section(doc, analysis, data)
-
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    return buffer.getvalue()
-
-
-# ──────────────────── 工具定义 ────────────────────
-
-@tool
-def list_templates() -> str:
-    """列出所有可用的报告模板。当用户开始对话时调用此工具，展示可选模板列表。"""
-    ctx = request_context.get() or new_context(method="list_templates")
-    result = {
-        "success": True,
-        "templates": [
-            {"name": name, "file": path}
-            for name, path in TEMPLATE_REGISTRY.items()
-        ],
-    }
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-@tool
-def analyze_report_template(template_name: str) -> str:
-    """解析指定模板，自动识别所有需要填写的字段，返回字段清单和收集计划。
-    在开始收集用户信息前必须先调用此工具。
-
-    Args:
-        template_name: 模板名称，从list_templates返回的名称中选择
-
-    Returns:
-        包含字段清单和收集计划的JSON字符串
-    """
-    ctx = request_context.get() or new_context(method="analyze_report_template")
-
-    try:
-        template_path = _get_template_path(template_name)
-        result = analyze_template(template_path)
-
-        # 区分简单行组和复杂行组
-        simple_groups = []
-        complex_groups = []
-        for g in result["row_groups"]:
-            if len(g["column_labels"]) <= _MAX_SIMPLE_GROUP_COLS:
-                simple_groups.append(g)
-            else:
-                complex_groups.append(g)
-
-        output = {
-            "success": True,
-            "template_name": template_name,
-            "total_label_fields": result["summary"]["total_unique_labels"],
-            "field_labels": [f["label"] for f in result["label_fields"]],
-            "repeat_labels": {f["label"]: f["repeat_count"] for f in result["label_fields"] if f["repeat_count"] > 1},
-            "simple_row_groups": [
-                {
-                    "group_id": g["group_id"],
-                    "template_row_count": g["template_row_count"],
-                    "column_labels": g["column_labels"],
-                }
-                for g in simple_groups
-            ],
-            "skipped_complex_groups": len(complex_groups),
-            "collection_plan": result["summary"]["collection_plan"],
-        }
-
-        return json.dumps(output, ensure_ascii=False, indent=2)
-
-    except Exception as e:
-        logger.error(f"模板解析失败: {e}")
-        return json.dumps({"success": False, "message": f"模板解析失败: {str(e)}"}, ensure_ascii=False, indent=2)
-
-
-@tool
-def generate_edu_report(template_name: str, report_data: str) -> str:
-    """生成教务报告Word文档。自动解析模板，将用户数据填入对应字段，保持模板格式不变，
-    上传到对象存储，返回下载链接。
-
-    Args:
-        template_name: 模板名称（与analyze_report_template使用相同名称）
-        report_data: JSON字符串，key为字段标签名或行组group_id，value为填写内容。
-            标签字段: key=标签名, value=字符串; 重复标签: value=数组。
-            行组字段: key=group_id, value=二维数组 [[行1列1,...],...]。
-
-    Returns:
-        包含文档下载链接的JSON字符串
-    """
-    ctx = request_context.get() or new_context(method="generate_edu_report")
-
-    try:
-        data = json.loads(report_data)
-    except json.JSONDecodeError as e:
-        return json.dumps({"success": False, "message": f"JSON解析失败: {str(e)}"}, ensure_ascii=False, indent=2)
-
-    try:
-        template_path = _get_template_path(template_name)
-        logger.info(f"基于模板'{template_name}'生成文档...")
-        doc_bytes = _build_report_docx(template_path, data)
-        logger.info(f"文档生成完成，大小: {len(doc_bytes)} bytes")
-
-        storage = _get_s3_storage()
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        file_name = f"edu_report/{template_name}_{timestamp}.docx"
-
+        
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        safe_name = template_name.replace(" ", "_")
+        file_name = f"edu_report/{safe_name}_{timestamp}.docx"
+        
         file_key = storage.upload_file(
-            file_content=doc_bytes,
+            file_content=docx_bytes,
             file_name=file_name,
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
-        download_url = storage.generate_presigned_url(key=file_key, expire_time=86400)
-
+        url = storage.generate_presigned_url(key=file_key, expire_time=86400)
+        
         return json.dumps({
             "success": True,
             "message": "报告已成功生成并上传",
             "file_name": file_name,
-            "download_url": download_url,
-        }, ensure_ascii=False, indent=2)
-
+            "download_url": url,
+        }, ensure_ascii=False)
+        
     except Exception as e:
-        logger.error(f"生成报告失败: {e}")
-        return json.dumps({"success": False, "message": f"生成报告失败: {str(e)}"}, ensure_ascii=False, indent=2)
+        return json.dumps({
+            "success": False,
+            "message": f"报告生成失败: {e}",
+        }, ensure_ascii=False)
