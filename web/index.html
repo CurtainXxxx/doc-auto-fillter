@@ -672,11 +672,11 @@ html, body {
       <div class="func-grid">
         <button class="func-btn" id="funcAutoFill" onclick="startAutoFill()">
           <span class="func-icon">🤖</span>
-          <span class="func-text"><span class="title">完全自动填写</span><span class="desc">AI逐批收集一键生成</span></span>
+          <span class="func-text"><span class="title">内置模板</span><span class="desc">选择预设模板生成</span></span>
         </button>
-        <button class="func-btn" id="funcSelectFill" onclick="startSelectFill()" style="opacity:0.45;cursor:not-allowed;" title="开发中">
-          <span class="func-icon">📌</span>
-          <span class="func-text"><span class="title">指定位置填写</span><span class="desc">点击字段精准填充</span></span>
+        <button class="func-btn" id="funcUploadTpl" onclick="triggerTemplateUpload()">
+          <span class="func-icon">📄</span>
+          <span class="func-text"><span class="title">上传模板</span><span class="desc">上传任意docx自动识别</span></span>
         </button>
         <button class="func-btn" id="funcCoFill" onclick="startCoFill()" style="opacity:0.45;cursor:not-allowed;" title="开发中">
           <span class="func-icon">✍️</span>
@@ -686,6 +686,8 @@ html, body {
           <span class="func-icon">📎</span>
           <span class="func-text"><span class="title">知识文件上传</span><span class="desc">上传文件AI自动提取</span></span>
         </button>
+      </div>
+      <input type="file" id="templateFileInput" accept=".docx,.doc" style="display:none" onchange="handleTemplateUpload(event)" />
       </div>
     </div>
 
@@ -891,6 +893,14 @@ function postProcessResponse(text) {
     if (tplMatch) currentTemplate = tplMatch[1];
   }
 
+  // 上传模板模式：Agent识别到字段后进入收集阶段
+  if (text.includes('识别到') && text.includes('字段') && currentStep === 0) {
+    currentStep = 1; updateStepBar();
+    // 提取模板文件名
+    const tplFileMatch = text.match(/模板[：:]?\s*(\S+\.docx?)/);
+    if (tplFileMatch) currentTemplate = tplFileMatch[1];
+  }
+
   if (text.includes('请填写') || text.includes('请提供') || text.includes('请输入')) {
     if (currentStep < 2) currentStep = 2;
     const fieldMatches = text.matchAll(/(?:请填写|请提供|请输入)[：:]?\s*[-–]?\s*(?:【)?([^\n,，。】【]+?)(?:】)?/g);
@@ -936,7 +946,7 @@ function updateStepBar() {
   });
 }
 
-// ── Function 1: Auto Fill ──
+// ── Function 1: Built-in Templates ──
 async function startAutoFill() {
   if (isStreaming) return;
   currentMode = 'auto';
@@ -944,11 +954,51 @@ async function startAutoFill() {
   document.getElementById('funcAutoFill').classList.add('active');
 
   if (currentStep === 0) {
-    appendMessage('user', '启动完全自动填写模式');
-    await callAgent('你好，我要使用完全自动填写模式生成教务文档，请展示可用模板');
+    appendMessage('user', '启动内置模板模式');
+    await callAgent('你好，我要使用内置模板生成教务文档，请展示可用模板');
   } else {
     appendMessage('user', '继续自动填写');
     await callAgent('继续收集信息');
+  }
+}
+
+// ── Function: Upload Template ──
+function triggerTemplateUpload() {
+  document.getElementById('templateFileInput').click();
+}
+
+async function handleTemplateUpload(event) {
+  if (!UPLOAD_URL) { alert('请通过部署后的 Web 服务 URL 访问。'); return; }
+  const file = event.target.files[0];
+  if (!file) return;
+  event.target.value = '';
+
+  const sizeStr = file.size < 1024*1024 ? (file.size/1024).toFixed(1)+'KB' : (file.size/1024/1024).toFixed(1)+'MB';
+  appendMessage('user', `上传了模板文件: ${file.name}（${sizeStr}）`);
+
+  document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('funcUploadTpl').classList.add('active');
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const resp = await fetch(UPLOAD_URL.replace('/upload', '/upload-template'), { method: 'POST', body: formData });
+    if (!resp.ok) throw new Error(`上传失败 HTTP ${resp.status}`);
+    const result = await resp.json();
+
+    if (result.success && result.extracted_text) {
+      const templatePath = result.template_path || '';
+      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_custom_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
+      await callAgent(agentMsg);
+    } else if (result.success && result.template_path) {
+      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${result.template_path}，请用analyze_custom_template工具分析这个模板，识别出所有需要填写的字段。`;
+      await callAgent(agentMsg);
+    } else {
+      appendMessage('assistant', `模板解析失败：${result.error || '未知错误'}，请确保上传的是.docx格式的Word文件。`);
+    }
+  } catch (err) {
+    appendMessage('assistant', `模板上传失败：${escapeHtml(err.message)}，请检查网络后重试。`);
   }
 }
 

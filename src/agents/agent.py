@@ -11,7 +11,10 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import AnyMessage
 from coze_coding_utils.runtime_ctx.context import default_headers
 from storage.memory.memory_saver import get_memory_saver
-from tools.edu_report_tool import generate_edu_report, analyze_report_template, list_templates
+from tools.edu_report_tool import (
+    generate_edu_report, analyze_report_template, list_templates,
+    analyze_uploaded_template, generate_from_template,
+)
 from tools.knowledge_tool import parse_knowledge_file
 
 LLM_CONFIG = "config/agent_llm_config.json"
@@ -57,7 +60,8 @@ def build_agent(ctx=None):
     return create_agent(
         model=llm,
         system_prompt=cfg.get("sp"),
-        tools=[list_templates, analyze_report_template, generate_edu_report, parse_knowledge_file],
+        tools=[list_templates, analyze_report_template, generate_edu_report,
+               parse_knowledge_file, analyze_uploaded_template, generate_from_template],
         checkpointer=get_memory_saver(),
         state_schema=AgentState,
     )

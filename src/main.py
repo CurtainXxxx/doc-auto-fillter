@@ -534,6 +534,57 @@ async def upload_file(file: UploadFile = File(...)):
         os.unlink(tmp_path)
 
 
+@app.post("/upload-template")
+async def upload_template_file(file: UploadFile = File(...)):
+    """接收前端上传的docx模板文件，保存并提取文本供Agent分析"""
+    import tempfile
+    from docx import Document
+
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    if not file.filename.lower().endswith(('.docx', '.doc')):
+        raise HTTPException(status_code=400, detail="Only .docx/.doc files are supported")
+
+    # 文件大小限制 10MB
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    # 保存到临时文件
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    # 提取文档文本内容（包括表格）
+    extracted_text = ""
+    try:
+        doc = Document(tmp_path)
+        # 提取段落
+        for para in doc.paragraphs:
+            if para.text.strip():
+                extracted_text += para.text.strip() + "\n"
+        # 提取表格
+        for t_idx, table in enumerate(doc.tables):
+            extracted_text += f"\n--- 表格{t_idx+1} ---\n"
+            for row in table.rows:
+                cells_text = []
+                for cell in row.cells:
+                    cells_text.append(cell.text.strip())
+                extracted_text += " | ".join(cells_text) + "\n"
+    except Exception as e:
+        logger.warning(f"Failed to extract text from template: {e}")
+        extracted_text = ""
+
+    return JSONResponse(content={
+        "success": True,
+        "filename": file.filename,
+        "template_path": tmp_path,
+        "extracted_text": extracted_text,
+        "message": f"模板文件已上传：{file.filename}，请告诉Agent分析此模板"
+    })
+
+
 @app.get(path="/graph_parameter")
 async def http_graph_inout_parameter(request: Request):
     return service.graph_inout_schema()

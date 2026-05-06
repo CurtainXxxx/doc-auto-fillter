@@ -721,7 +721,7 @@ def analyze_report_template(template_name: str) -> str:
 
 @tool
 def generate_edu_report(template_name: str, report_data: str) -> str:
-    """根据模板和用户数据生成教务报告文档。
+    """根据预设模板和用户数据生成教务报告文档（仅支持预设的3种模板）。
 
     Args:
         template_name: 模板名称（评价报告/试卷分析/关联矩阵）
@@ -777,4 +777,152 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         return json.dumps({
             "success": False,
             "message": f"报告生成失败: {e}",
+        }, ensure_ascii=False)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 通用模板工具：支持任意docx文件的自动识别和填充
+# ═══════════════════════════════════════════════════════════════
+
+@tool
+def analyze_uploaded_template(file_path: str) -> str:
+    """分析用户上传的任意Word模板文件，自动识别待填字段。
+    支持识别：冒号字段、标签+空白格、勾选框、占位符、多列数据行、行组等。
+
+    Args:
+        file_path: 上传的docx文件路径（通常是上传后的临时文件路径）
+    """
+    ctx = request_context.get() or new_context(method="analyze_uploaded_template")
+    
+    try:
+        import os
+        workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+        if not os.path.isabs(file_path):
+            full_path = os.path.join(workspace, file_path)
+        else:
+            full_path = file_path
+        
+        if not os.path.exists(full_path):
+            return json.dumps({"success": False, "message": f"文件不存在: {file_path}"}, ensure_ascii=False)
+        
+        analysis = analyze_template(full_path)
+        user_fields = _simplify_fields(analysis['label_fields'])
+        
+        # 构建用户友好的字段描述
+        field_descriptions = []
+        for f in user_fields:
+            if f['fill_mode'] == 'group':
+                subs = f['sub_labels']
+                field_descriptions.append({
+                    "label": f['label'],
+                    "type": "group",
+                    "sub_items": subs,
+                    "hint": f"请提供{len(subs)}个值，用逗号分隔",
+                })
+            else:
+                desc = {"label": f['label'], "type": "single"}
+                # 添加提示
+                label_lower = f['label']
+                if any(k in label_lower for k in ['签字', '签名']):
+                    desc['hint'] = "请填写姓名"
+                elif any(k in label_lower for k in ['日期', '时间']):
+                    desc['hint'] = "请填写日期"
+                elif any(k in label_lower for k in ['百分比', '比例', '占比']):
+                    desc['hint'] = "请填写数值"
+                field_descriptions.append(desc)
+        
+        # 行组信息
+        row_group_info = []
+        for g in analysis['row_groups']:
+            row_group_info.append({
+                "group_id": g['group_id'],
+                "num_cols": g['num_cols'],
+                "template_row_count": g['template_row_count'],
+                "column_labels": g.get('column_labels', []),
+            })
+        
+        return json.dumps({
+            "success": True,
+            "file_name": os.path.basename(full_path),
+            "total_fields": len(user_fields),
+            "fields": field_descriptions,
+            "row_groups": row_group_info,
+            "summary": f"识别到{len(user_fields)}个待填字段和{len(row_group_info)}个数据行组",
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"模板分析失败: {e}"}, ensure_ascii=False)
+
+
+@tool
+def generate_from_template(file_path: str, report_data: str) -> str:
+    """根据用户上传的模板文件和填写数据，生成填充后的文档。
+    支持任意docx模板文件的自动填充。
+
+    Args:
+        file_path: 模板文件路径（与analyze_uploaded_template使用的路径相同）
+        report_data: JSON格式的填写数据，键为字段名，值为字段值。
+                     多值字段用逗号分隔，如 {"及百分比": "15,15,20,20,10,10,5,5,0"}
+                     行组数据用二维数组，如 {"T0_G0": [["值1","值2"],...]}
+    """
+    ctx = request_context.get() or new_context(method="generate_from_template")
+    
+    try:
+        import os
+        workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+        if not os.path.isabs(file_path):
+            full_path = os.path.join(workspace, file_path)
+        else:
+            full_path = file_path
+        
+        if not os.path.exists(full_path):
+            return json.dumps({"success": False, "message": f"文件不存在: {file_path}"}, ensure_ascii=False)
+        
+        data = json.loads(report_data)
+        
+        # 扩展用户数据到内部子字段
+        expanded = _expand_report_data(full_path, data)
+        
+        # 行组数据直接使用
+        for g in analyze_template(full_path)['row_groups']:
+            gid = g['group_id']
+            if gid in data and gid not in expanded:
+                expanded[gid] = data[gid]
+        
+        doc_bytes = _build_report_docx(full_path, expanded)
+        
+        # 上传到对象存储
+        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        import time
+        
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
+        
+        timestamp = time.strftime("%Y%m%d%H%M%S")
+        safe_name = os.path.splitext(os.path.basename(full_path))[0].replace(" ", "_")
+        file_name = f"custom_report/{safe_name}_{timestamp}.docx"
+        
+        file_key = storage.upload_file(
+            file_content=doc_bytes,
+            file_name=file_name,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        url = storage.generate_presigned_url(key=file_key, expire_time=86400)
+        
+        return json.dumps({
+            "success": True,
+            "message": "文档已成功生成并上传",
+            "file_name": file_key,
+            "download_url": url,
+        }, ensure_ascii=False)
+        
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "message": f"文档生成失败: {e}",
         }, ensure_ascii=False)
