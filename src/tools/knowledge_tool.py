@@ -3,6 +3,12 @@
 import os
 import re
 import json
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 文件
+_workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+load_dotenv(os.path.join(_workspace, ".env"), override=False)
+
 from langchain.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage
 from coze_coding_dev_sdk import LLMClient

@@ -3,6 +3,11 @@
 import os
 import json
 from typing import Annotated
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 文件（用于配置外部模型API密钥等）
+_workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+load_dotenv(os.path.join(_workspace, ".env"), override=False)
 
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
