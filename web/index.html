@@ -688,7 +688,6 @@ html, body {
         </button>
       </div>
       <input type="file" id="templateFileInput" accept=".docx,.doc" style="display:none" onchange="handleTemplateUpload(event)" />
-      </div>
     </div>
 
     <div class="chat-input">
@@ -989,10 +988,10 @@ async function handleTemplateUpload(event) {
 
     if (result.success && result.extracted_text) {
       const templatePath = result.template_path || '';
-      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_custom_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
+      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_uploaded_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
       await callAgent(agentMsg);
     } else if (result.success && result.template_path) {
-      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${result.template_path}，请用analyze_custom_template工具分析这个模板，识别出所有需要填写的字段。`;
+      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${result.template_path}，请用analyze_uploaded_template工具分析这个模板，识别出所有需要填写的字段。`;
       await callAgent(agentMsg);
     } else {
       appendMessage('assistant', `模板解析失败：${result.error || '未知错误'}，请确保上传的是.docx格式的Word文件。`);
