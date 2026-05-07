@@ -39,8 +39,19 @@ def build_agent(ctx=None):
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
 
-    api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
-    base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+    # 支持外部模型API：设置 EXTERNAL_LLM_API_KEY 即可切换
+    # 例如 DeepSeek: EXTERNAL_LLM_API_KEY=sk-xxx EXTERNAL_LLM_BASE_URL=https://api.deepseek.com
+    ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
+    ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
+
+    if ext_api_key and ext_base_url:
+        # 使用外部模型API（如 DeepSeek）
+        api_key = ext_api_key
+        base_url = ext_base_url
+    else:
+        # 使用平台内置模型
+        api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
+        base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
 
     llm = ChatOpenAI(
         model=cfg["config"].get("model"),
@@ -53,8 +64,8 @@ def build_agent(ctx=None):
             "thinking": {
                 "type": cfg["config"].get("thinking", "disabled")
             }
-        },
-        default_headers=default_headers(ctx) if ctx else {},
+        } if not ext_api_key else {},  # 外部API不需要thinking参数
+        default_headers=default_headers(ctx) if ctx and not ext_api_key else {},
     )
 
     return create_agent(

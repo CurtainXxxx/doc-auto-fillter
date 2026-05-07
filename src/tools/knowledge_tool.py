@@ -140,25 +140,43 @@ def _llm_extract_fields(field_list: list, file_content: str, ctx=None) -> dict:
 只返回JSON，不要其他文字。"""
 
     try:
-        client = LLMClient(ctx=ctx)
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
-        response = client.invoke(
-            messages=messages,
-            model="doubao-seed-1-6-lite-251015",
-            temperature=0.1,
-            max_completion_tokens=4096,
-        )
+        # 支持外部模型API（如 DeepSeek）
+        ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
+        ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
 
-        # 解析LLM返回的JSON
-        content = response.content
-        if isinstance(content, list):
-            content = " ".join(
-                item.get("text", "") for item in content
-                if isinstance(item, dict) and item.get("type") == "text"
+        if ext_api_key and ext_base_url:
+            # 使用外部API
+            from langchain_openai import ChatOpenAI
+            ext_model = os.getenv("EXTERNAL_LLM_MODEL", "deepseek-chat")
+            ext_llm = ChatOpenAI(
+                model=ext_model,
+                api_key=ext_api_key,
+                base_url=ext_base_url,
+                temperature=0.1,
+                max_tokens=4096,
             )
+            from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
+            response = ext_llm.invoke([SM(content=system_prompt), HM(content=user_prompt)])
+            content = response.content
+        else:
+            # 使用平台内置LLM
+            client = LLMClient(ctx=ctx)
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+            response = client.invoke(
+                messages=messages,
+                model="doubao-seed-1-6-lite-251015",
+                temperature=0.1,
+                max_completion_tokens=4096,
+            )
+            content = response.content
+            if isinstance(content, list):
+                content = " ".join(
+                    item.get("text", "") for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                )
 
         # 提取JSON部分
         content = content.strip()
