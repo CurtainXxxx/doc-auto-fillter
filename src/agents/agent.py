@@ -53,13 +53,15 @@ def build_agent(ctx=None):
         # 使用外部模型API（如 DeepSeek）
         api_key = ext_api_key
         base_url = ext_base_url
+        model = os.getenv("EXTERNAL_LLM_MODEL", "deepseek-chat")
     else:
         # 使用平台内置模型
         api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
         base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+        model = cfg["config"].get("model", "doubao-seed-1-6-251015")
 
     llm = ChatOpenAI(
-        model=cfg["config"].get("model"),
+        model=model,
         api_key=api_key,
         base_url=base_url,
         temperature=cfg["config"].get("temperature", 0.7),
