@@ -36,24 +36,55 @@ def _extract_text_from_file(file_path: str) -> str:
     if ext in ('.docx', '.doc'):
         try:
             from docx import Document
+            from docx.oxml.ns import qn
             doc = Document(file_path)
             text_parts = []
+
+            # 1. 段落文本
             for para in doc.paragraphs:
                 if para.text.strip():
                     text_parts.append(para.text.strip())
-            for table in doc.tables:
-                for row in table.rows:
-                    # 用unique cells避免合并单元格重复
-                    seen = set()
-                    cells = []
-                    for cell in row.cells:
-                        cid = id(cell._element)
-                        if cid not in seen:
-                            seen.add(cid)
-                            cells.append(cell.text.strip())
-                    non_empty = [c for c in cells if c]
-                    if non_empty:
-                        text_parts.append(' | '.join(non_empty))
+
+            # 2. 表格 - 使用 lxml 逐行获取实际 tc 元素，避免合并单元格缓存问题
+            #    python-docx 对垂直合并的单元格会返回相同的 Cell 对象，
+            #    导致多行共享同一个底层 XML 元素，读取时内容重复
+            for t_idx, table in enumerate(doc.tables):
+                trs = table._tbl.findall(qn('w:tr'))
+                table_rows = []
+                for tr in trs:
+                    tcs = tr.findall(qn('w:tc'))
+                    row_texts = []
+                    for tc in tcs:
+                        cell_text = ''.join(
+                            (t_el.text or '') for t_el in tc.findall('.//' + qn('w:t'))
+                        ).strip()
+                        row_texts.append(cell_text)
+                    if any(t for t in row_texts):
+                        table_rows.append(row_texts)
+
+                if not table_rows:
+                    continue
+
+                # 检测是否是 key-value 表（2列，首列为标签，末列为值）
+                is_kv_table = (
+                    len(table_rows) >= 2
+                    and all(len(r) == 2 for r in table_rows)
+                )
+
+                if is_kv_table:
+                    kv_pairs = []
+                    for cells in table_rows:
+                        label = cells[0].replace('\n', ' ').strip()
+                        value = cells[1].replace('\n', ' ').strip()
+                        if label and value:
+                            kv_pairs.append(f"{label}：{value}")
+                    text_parts.append(f'---\n【表格{t_idx + 1} - 键值对】')
+                    text_parts.extend(kv_pairs)
+                else:
+                    text_parts.append(f'---\n【表格{t_idx + 1}】')
+                    for cells in table_rows:
+                        text_parts.append(' | '.join(cells))
+
             return '\n'.join(text_parts)
         except Exception as e:
             return f"[docx解析失败: {str(e)}]"
@@ -178,25 +209,31 @@ def _llm_extract_fields(field_list: list, file_content: str, ctx=None) -> dict:
                 max_completion_tokens=4096,
             )
             content = response.content
+            # type: ignore 响应内容可能为list或str
+            content_str: str = ""
             if isinstance(content, list):
-                content = " ".join(
+                content_str = " ".join(
                     item.get("text", "") for item in content
                     if isinstance(item, dict) and item.get("type") == "text"
                 )
+            elif isinstance(content, str):
+                content_str = content
+            else:
+                content_str = str(content)
 
         # 提取JSON部分
-        content = content.strip()
+        content_str = content_str.strip()
         # 尝试直接解析
         try:
-            result = json.loads(content)
+            result = json.loads(content_str)
         except json.JSONDecodeError:
             # 尝试提取JSON代码块
-            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content_str)
             if json_match:
                 result = json.loads(json_match.group(1).strip())
             else:
                 # 尝试提取花括号内容
-                brace_match = re.search(r'\{[\s\S]*\}', content)
+                brace_match = re.search(r'\{[\s\S]*\}', content_str)
                 if brace_match:
                     result = json.loads(brace_match.group(0))
                 else:

@@ -80,66 +80,51 @@ def _is_vmerge_restart(cell) -> bool:
 
 
 def _set_tc_text(tc, text: str, rPr_source=None):
-    """直接在tc元素上设置文本，100%保留原有格式。
-    
-    核心原则：只修改文本内容，绝不动任何格式元素。
-    - 有现有run：直接修改第一个run的w:t文本，保留原rPr和其他属性
-    - 无现有run：创建新run，从rPr_source复制格式
-    - 保留段落属性（pPr）、书签（bookmarkStart/End）、注释等
+    """替换 tc 元素中所有文本内容，保留原有格式。
+
+    策略：
+    1. 移除所有内容子元素（w:p、w:tbl 等），仅保留 w:tcPr（边框/宽度等属性）
+       - 同时移除嵌套表格（w:tbl），防止旧文本藏在内嵌表中
+    2. 对含图表（w:drawing / c:chart）的单元格，保留全部原有内容，仅插入新段落
+    3. 创建新段落写入文本，从 rPr_source 复制字体/字号等格式
     """
-    paragraphs = tc.findall(qn("w:p"))
-    if not paragraphs:
-        # 没有段落则创建（极罕见）
-        p_elem = tc.makeelement(qn("w:p"), {})
-        tc.append(p_elem)
-        paragraphs = [p_elem]
-    
-    p = paragraphs[0]
-    runs = p.findall(qn("w:r"))
-    
-    if runs:
-        # ✅ 最佳路径：直接修改第一个run的文本，不动任何格式元素
-        first_run = runs[0]
-        t_elems = first_run.findall(qn("w:t"))
-        if t_elems:
-            # 直接修改现有w:t的文本
-            t_elems[0].text = str(text)
-            t_elems[0].set(qn("xml:space"), "preserve")
+    # 检查单元格是否含有图表/绘图（需保护，不可删除）
+    has_drawing = (len(tc.findall('.//' + qn('w:drawing'))) > 0 or
+                   len(tc.findall('.//' + qn('c:chart'))) > 0)
+
+    if not has_drawing:
+        # 移除所有内容子元素，只保留 tcPr
+        to_remove = []
+        for child in tc:
+            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
+            if tag != 'tcPr':
+                to_remove.append(child)
+        for child in to_remove:
+            tc.remove(child)
+
+    # 在开头插入新段落
+    p = tc.makeelement(qn('w:p'), {})
+    tc.insert(0, p)
+
+    # 创建 run
+    r = p.makeelement(qn('w:r'), {})
+
+    # 从 rPr_source 复制格式（字体、字号等）
+    if rPr_source is not None:
+        if rPr_source.tag == qn('w:rPr'):
+            r.append(copy.deepcopy(rPr_source))
         else:
-            # run中没有w:t（罕见），添加一个
-            t_elem = first_run.makeelement(qn("w:t"), {})
-            t_elem.text = str(text)
-            t_elem.set(qn("xml:space"), "preserve")
-            first_run.append(t_elem)
-        
-        # 删除多余run（保留第一个run的格式）
-        for r in list(runs[1:]):
-            p.remove(r)
-    else:
-        # 没有现有run（空白格），创建新run并从源复制格式
-        r_elem = p.makeelement(qn("w:r"), {})
-        if rPr_source is not None:
-            if rPr_source.tag == qn("w:rPr"):
-                r_elem.append(copy.deepcopy(rPr_source))
-            else:
-                # 从tc元素中查找rPr
-                src_rPr = rPr_source.find(qn("w:rPr"))
-                if src_rPr is None:
-                    # 遍历所有段落和run找rPr
-                    for src_p in rPr_source.findall(qn("w:p")):
-                        for src_r in src_p.findall(qn("w:r")):
-                            src_rPr = src_r.find(qn("w:rPr"))
-                            if src_rPr is not None:
-                                break
-                        if src_rPr is not None:
-                            break
-                if src_rPr is not None:
-                    r_elem.append(copy.deepcopy(src_rPr))
-        t_elem = r_elem.makeelement(qn("w:t"), {})
-        t_elem.text = str(text)
-        t_elem.set(qn("xml:space"), "preserve")
-        r_elem.append(t_elem)
-        p.append(r_elem)
+            src_rPr = rPr_source.find(qn('w:rPr'))
+            if src_rPr is not None:
+                r.append(copy.deepcopy(src_rPr))
+
+    t_elem = r.makeelement(qn('w:t'), {})
+    t_elem.text = str(text)
+    t_elem.set(qn('xml:space'), 'preserve')
+    r.append(t_elem)
+
+    # 将 run 添加到段落
+    p.append(r)
 
 
 def _set_cell_text(cell, text: str, rPr_source=None):
@@ -295,7 +280,8 @@ def _fill_label_fields(doc, label_fields, data):
                 tr = table.rows[ri]._tr
                 tcs = tr.findall(qn("w:tc"))
                 if col_idx < len(tcs):
-                    _set_tc_text(tcs[col_idx], str(value))
+                    rPr_source = _find_label_rPr_in_row(tr)
+                    _set_tc_text(tcs[col_idx], str(value), rPr_source=rPr_source)
             
             elif fill_mode == "append":
                 # 冒号模式：在标签后追加值
