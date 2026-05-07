@@ -1,9 +1,11 @@
-"""知识文件解析工具 - 解析用户上传的文件，提取文档所需信息"""
+"""知识文件解析工具 - 通过LLM智能提取文档所需信息"""
 
 import os
 import re
 import json
 from langchain.tools import tool
+from langchain_core.messages import SystemMessage, HumanMessage
+from coze_coding_dev_sdk import LLMClient
 from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import new_context
 
@@ -97,96 +99,227 @@ def extract_text_from_upload(file_path: str) -> dict:
         return {"success": False, "extracted_text": "", "error": str(e)}
 
 
-def _find_field_in_text(field: str, content: str) -> list:
+def _llm_extract_fields(field_list: list, file_content: str, ctx=None) -> dict:
+    """使用LLM从文件内容中智能提取字段值。
+
+    Args:
+        field_list: 需要提取的字段名列表，如 ["课程名称", "学时数", "教师姓名"]
+        file_content: 知识文件的文本内容
+        ctx: 请求上下文
+
+    Returns:
+        dict: {字段名: 提取到的值}，未提取到的字段不在结果中
     """
-    在文本内容中智能搜索字段的值。
+    # 限制文件内容长度（避免token过多）
+    max_chars = 8000
+    if len(file_content) > max_chars:
+        file_content = file_content[:max_chars] + "\n...(内容过长已截断)"
+
+    fields_str = "、".join(field_list)
+
+    system_prompt = """你是一个精确的信息提取助手。你的任务是从给定的文件内容中，提取指定字段的值。
+
+规则：
+1. 只提取明确出现在文件内容中的信息，不要编造
+2. 对于每个字段，找到最匹配的值。字段名可能和文件中的表述不完全一致，你需要理解语义匹配
+   - 例如：字段"课程名称"可能对应文件中的"课程名"、"课程"、"科目名称"等
+   - 例如：字段"学时数"可能对应文件中的"学时"、"总学时"、"课时"等
+   - 例如：字段"教师姓名"可能对应文件中的"任课教师"、"授课教师"、"主讲教师"等
+3. 提取的值应该简洁，去掉多余的前缀和后缀
+4. 如果文件中找不到某个字段的值，就不要在结果中包含该字段
+5. 必须返回合法的JSON格式"""
+
+    user_prompt = f"""请从以下文件内容中提取这些字段的值：{fields_str}
+
+文件内容：
+{file_content}
+
+请返回JSON格式，例如：
+{{"课程名称": "高等数学", "学时数": "64", "教师姓名": "张明"}}
+
+只返回JSON，不要其他文字。"""
+
+    try:
+        client = LLMClient(ctx=ctx)
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        response = client.invoke(
+            messages=messages,
+            model="doubao-seed-1-6-lite-251015",
+            temperature=0.1,
+            max_completion_tokens=4096,
+        )
+
+        # 解析LLM返回的JSON
+        content = response.content
+        if isinstance(content, list):
+            content = " ".join(
+                item.get("text", "") for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            )
+
+        # 提取JSON部分
+        content = content.strip()
+        # 尝试直接解析
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError:
+            # 尝试提取JSON代码块
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content)
+            if json_match:
+                result = json.loads(json_match.group(1).strip())
+            else:
+                # 尝试提取花括号内容
+                brace_match = re.search(r'\{[\s\S]*\}', content)
+                if brace_match:
+                    result = json.loads(brace_match.group(0))
+                else:
+                    return {}
+
+        # 过滤：只保留field_list中的字段，值必须是字符串且非空
+        extracted = {}
+        for field in field_list:
+            if field in result and result[field]:
+                val = str(result[field]).strip()
+                if val and val not in ("null", "None", "无", "未知", "-"):
+                    extracted[field] = val
+
+        return extracted
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"LLM提取失败: {e}")
+        return {}
+
+
+def _rule_extract_fields(field_list: list, file_content: str) -> dict:
+    """使用规则匹配从文件内容中提取字段值（兜底方案）。
+
     支持多种格式：
-    - 冒号模式: 课程性质：专业必修课 / 课程性质: 专业必修课
-    - 等号模式: 课程性质＝专业必修课 / 课程性质=专业必修课
+    - 冒号模式: 课程性质：专业必修课
+    - 等号模式: 课程性质＝专业必修课
     - 管道符/表格模式: 课程性质 | 专业必修课
     - "是"模式: 课程性质是专业必修课
     - 【】模式: 【课程性质】专业必修课
     """
-    found = []
+    extracted = {}
 
-    # 标准化字段名，去掉可能的空格
-    field_clean = field.strip()
+    # 字段名别名映射（同义词扩展）
+    ALIAS_MAP = {
+        "课程名称": ["课程名", "课程", "科目名称", "科目", "课程代码名称"],
+        "学时数": ["学时", "总学时", "课时", "总课时", "教学时数"],
+        "教师姓名": ["任课教师", "授课教师", "主讲教师", "教师", "任课老师"],
+        "开课单位": ["开课院系", "教学单位", "院系", "所在院系", "开课学院"],
+        "课程性质": ["课程类别", "课程类型", "修读性质"],
+        "学生班级": ["教学班", "班级", "授课班级", "教学班级"],
+        "开课时间": ["学期", "开课学期", "授课学期"],
+        "考试类别": ["考核方式", "考试方式"],
+        "考试形式": ["考试类型"],
+        "平均分": ["平均成绩", "均分"],
+        "最高分": ["最高成绩"],
+        "最低分": ["最低成绩"],
+        "标准差": ["标准偏差", "成绩标准差"],
+    }
 
-    for line in content.split('\n'):
-        line = line.strip()
-        if not line:
+    for field in field_list:
+        # 构建搜索词列表：原名 + 别名
+        search_terms = [field]
+        if field in ALIAS_MAP:
+            search_terms.extend(ALIAS_MAP[field])
+
+        found_values = []
+
+        for term in search_terms:
+            for line in file_content.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+
+                # ── 冒号/等号分隔 ──
+                for sep in ['：', ':', '＝', '=']:
+                    pat = re.compile(
+                        r'(?:^|\|)\s*' + re.escape(term) + r'\s*' + re.escape(sep) + r'\s*(.+?)(?:\s*\||$)'
+                    )
+                    m = pat.search(line)
+                    if m:
+                        val = m.group(1).strip().rstrip('，。,.;；')
+                        if val and len(val) < 100 and val != term:
+                            found_values.append(val)
+                            break
+                else:
+                    continue
+                break
+
+                if found_values:
+                    break
+
+            if found_values:
+                break
+
+        if found_values:
+            extracted[field] = found_values[0]
             continue
 
-        # ── 模式1: 冒号/等号分隔 ──
-        # 课程性质：专业必修课 / 课程性质: 专业必修课
-        for sep in ['：', ':', '＝', '=']:
-            # 精确匹配: 行首或管道符后 + 字段名 + 分隔符
-            patterns = [
-                re.compile(r'(?:^|\|)\s*' + re.escape(field_clean) + r'\s*' + re.escape(sep) + r'\s*(.+?)(?:\s*\||$)'),
-            ]
-            for pat in patterns:
-                m = pat.search(line)
+        # ── 管道符/表格格式 ──
+        for term in search_terms:
+            done = False
+            for line in file_content.split('\n'):
+                line = line.strip()
+                if '|' not in line:
+                    continue
+                parts = [p.strip() for p in line.split('|') if p.strip()]
+                for i, part in enumerate(parts):
+                    if part == term and i + 1 < len(parts):
+                        val = parts[i + 1].rstrip('，。,.;；')
+                        if val and len(val) < 100 and val != term:
+                            extracted[field] = val
+                            done = True
+                            break
+                if done:
+                    break
+            if done:
+                break
+
+        if field in extracted:
+            continue
+
+        # ── "是"连接 ──
+        for term in search_terms:
+            for line in file_content.split('\n'):
+                m = re.search(re.escape(term) + r'是(.+?)(?:[,，。.;；\|]|$)', line)
                 if m:
-                    val = m.group(1).strip().rstrip('，。,.;；')
-                    if val and len(val) < 100 and val != field_clean:
-                        found.append(val)
+                    val = m.group(1).strip()
+                    if val and len(val) < 100:
+                        extracted[field] = val
                         break
-            else:
-                continue
-            break  # 如果已经匹配到了，跳过其他分隔符
+            if field in extracted:
+                break
 
-        if found:
-            # 已经在这行找到了，跳到下一行
+        if field in extracted:
             continue
 
-        # ── 模式2: 管道符/表格格式 ──
-        # ... | 课程性质 | 专业必修课 | ...
-        if '|' in line:
-            parts = [p.strip() for p in line.split('|') if p.strip()]
-            for i, part in enumerate(parts):
-                if part == field_clean and i + 1 < len(parts):
-                    val = parts[i + 1].rstrip('，。,.;；')
-                    if val and len(val) < 100 and val != field_clean:
-                        found.append(val)
+        # ── 【字段】值 ──
+        for term in search_terms:
+            for line in file_content.split('\n'):
+                m = re.search(r'【' + re.escape(term) + r'】\s*(.+?)(?:[,，。.;；\|]|$)', line)
+                if m:
+                    val = m.group(1).strip()
+                    if val and len(val) < 100:
+                        extracted[field] = val
                         break
+            if field in extracted:
+                break
 
-        if found:
-            continue
-
-        # ── 模式3: "是"连接 ──
-        # 课程性质是专业必修课
-        m = re.search(re.escape(field_clean) + r'是(.+?)(?:[,，。.;；\|]|$)', line)
-        if m:
-            val = m.group(1).strip()
-            if val and len(val) < 100:
-                found.append(val)
-                continue
-
-        # ── 模式4: 【字段】值 ──
-        m = re.search(r'【' + re.escape(field_clean) + r'】\s*(.+?)(?:[,，。.;；\|]|$)', line)
-        if m:
-            val = m.group(1).strip()
-            if val and len(val) < 100:
-                found.append(val)
-                continue
-
-        # ── 模式5: 逗号分隔键值对 ──
-        # 课程性质,专业必修课  (在CSV或简单格式中)
-        m = re.search(re.escape(field_clean) + r'[,，]\s*([^,，\n]+)', line)
-        if m:
-            val = m.group(1).strip().rstrip('，。,.;；')
-            if val and len(val) < 100 and val != field_clean:
-                found.append(val)
-                continue
-
-    return found
+    return extracted
 
 
 @tool
 def parse_knowledge_file(file_description: str, file_content: str, missing_fields: str) -> str:
-    """
-    解析用户上传的知识文件内容，提取文档所需的缺失信息。
+    """解析用户上传的知识文件内容，智能提取文档所需的缺失信息。
 
+    优先使用LLM进行语义理解提取，规则匹配作为兜底。
     当Agent发现用户缺少某些字段信息，且用户上传了文件时，调用此工具从文件内容中提取缺失字段。
 
     Args:
@@ -195,41 +328,47 @@ def parse_knowledge_file(file_description: str, file_content: str, missing_field
         missing_fields: 需要提取的缺失字段列表，用逗号分隔
 
     Returns:
-        提取结果JSON字符串，包含每个字段的候选值
+        提取结果JSON字符串，包含每个字段的提取值
     """
     ctx = request_context.get() or new_context(method="parse_knowledge_file")
 
     fields = [f.strip() for f in missing_fields.split(',') if f.strip()]
-    content = file_content[:5000]  # 扩大到5000字符
+    content = file_content[:10000]  # 扩大到10000字符
 
     result = {
         "file": file_description,
         "missing_fields": fields,
         "extracted": {},
-        "summary": f"已从文件中搜索以下字段：{', '.join(fields)}"
+        "summary": f"已从文件中智能提取以下字段：{', '.join(fields)}"
     }
 
-    # 使用增强的智能匹配提取
-    for field in fields:
-        found = _find_field_in_text(field, content)
-        if found:
-            # 去重
-            unique = list(dict.fromkeys(found))
-            result["extracted"][field] = unique[:5]  # 最多5个候选
+    # 优先：LLM智能提取
+    llm_extracted = _llm_extract_fields(fields, content, ctx=ctx)
 
-    # 生成候选选择提示
-    choice_lines = []
-    for field, values in result["extracted"].items():
-        if len(values) == 1:
-            choice_lines.append(f"✅ {field}：{values[0]}（唯一匹配）")
-        elif len(values) > 1:
-            options = '、'.join([f"({chr(0x2460+i)}){v}" for i, v in enumerate(values)])
-            choice_lines.append(f"❓ {field}：检测到多个候选值 {options}，请用户确认")
+    # 兜底：规则匹配提取
+    rule_extracted = _rule_extract_fields(fields, content)
+
+    # 合并结果：LLM优先，规则补充
+    for field in fields:
+        if field in llm_extracted:
+            result["extracted"][field] = llm_extracted[field]
+        elif field in rule_extracted:
+            result["extracted"][field] = rule_extracted[field]
+
+    # 生成提示
+    lines = []
+    found_fields = []
+    for field in fields:
+        if field in result["extracted"]:
+            lines.append(f"✅ {field}：{result['extracted'][field]}")
+            found_fields.append(field)
 
     unfound = [f for f in fields if f not in result["extracted"]]
     if unfound:
-        choice_lines.append(f"⚠ 未找到：{', '.join(unfound)}")
+        lines.append(f"⚠ 未找到：{', '.join(unfound)}")
 
-    result["choice_prompt"] = '\n'.join(choice_lines)
+    result["choice_prompt"] = '\n'.join(lines)
+    result["found_count"] = len(found_fields)
+    result["total_count"] = len(fields)
 
     return json.dumps(result, ensure_ascii=False)

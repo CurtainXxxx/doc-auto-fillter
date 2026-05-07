@@ -80,14 +80,16 @@ def _is_vmerge_restart(cell) -> bool:
 
 
 def _set_tc_text(tc, text: str, rPr_source=None):
-    """直接在tc元素上设置文本，保留原有格式。
+    """直接在tc元素上设置文本，100%保留原有格式。
     
-    策略：保留第一个w:r的w:rPr（格式属性），只修改文本内容。
-    如果没有w:r但有rPr_source，则从源复制格式。
+    核心原则：只修改文本内容，绝不动任何格式元素。
+    - 有现有run：直接修改第一个run的w:t文本，保留原rPr和其他属性
+    - 无现有run：创建新run，从rPr_source复制格式
+    - 保留段落属性（pPr）、书签（bookmarkStart/End）、注释等
     """
     paragraphs = tc.findall(qn("w:p"))
     if not paragraphs:
-        # 没有段落则创建
+        # 没有段落则创建（极罕见）
         p_elem = tc.makeelement(qn("w:p"), {})
         tc.append(p_elem)
         paragraphs = [p_elem]
@@ -96,35 +98,41 @@ def _set_tc_text(tc, text: str, rPr_source=None):
     runs = p.findall(qn("w:r"))
     
     if runs:
-        # 保留第一个run的格式（rPr），清空其文本，设置新文本
+        # ✅ 最佳路径：直接修改第一个run的文本，不动任何格式元素
         first_run = runs[0]
-        # 保存rPr
-        rPr = first_run.find(qn("w:rPr"))
+        t_elems = first_run.findall(qn("w:t"))
+        if t_elems:
+            # 直接修改现有w:t的文本
+            t_elems[0].text = str(text)
+            t_elems[0].set(qn("xml:space"), "preserve")
+        else:
+            # run中没有w:t（罕见），添加一个
+            t_elem = first_run.makeelement(qn("w:t"), {})
+            t_elem.text = str(text)
+            t_elem.set(qn("xml:space"), "preserve")
+            first_run.append(t_elem)
         
-        # 移除所有现有run
-        for r in list(runs):
+        # 删除多余run（保留第一个run的格式）
+        for r in list(runs[1:]):
             p.remove(r)
-        
-        # 创建新run，复制原有格式
-        new_run = p.makeelement(qn("w:r"), {})
-        if rPr is not None:
-            new_run.append(copy.deepcopy(rPr))
-        t_elem = new_run.makeelement(qn("w:t"), {})
-        t_elem.text = str(text)
-        # 保留空格
-        t_elem.set(qn("xml:space"), "preserve")
-        new_run.append(t_elem)
-        p.append(new_run)
     else:
-        # 没有现有run，创建新的
+        # 没有现有run（空白格），创建新run并从源复制格式
         r_elem = p.makeelement(qn("w:r"), {})
-        # 如果提供了格式源，复制格式
         if rPr_source is not None:
-            # rPr_source 可以是 w:rPr 元素或 w:tc 元素
             if rPr_source.tag == qn("w:rPr"):
                 r_elem.append(copy.deepcopy(rPr_source))
             else:
+                # 从tc元素中查找rPr
                 src_rPr = rPr_source.find(qn("w:rPr"))
+                if src_rPr is None:
+                    # 遍历所有段落和run找rPr
+                    for src_p in rPr_source.findall(qn("w:p")):
+                        for src_r in src_p.findall(qn("w:r")):
+                            src_rPr = src_r.find(qn("w:rPr"))
+                            if src_rPr is not None:
+                                break
+                        if src_rPr is not None:
+                            break
                 if src_rPr is not None:
                     r_elem.append(copy.deepcopy(src_rPr))
         t_elem = r_elem.makeelement(qn("w:t"), {})
