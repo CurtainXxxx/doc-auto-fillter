@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 # 加载项目根目录的 .env 文件
 _workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-load_dotenv(os.path.join(_workspace, ".env"), override=False)
+load_dotenv(os.path.join(_workspace, ".env"), override=True)
 
 from langchain.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage
