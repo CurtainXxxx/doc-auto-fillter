@@ -79,23 +79,64 @@ def _is_vmerge_restart(cell) -> bool:
     return False
 
 
-def _set_tc_text(tc, text: str):
-    """直接在tc元素上设置文本（清空后写入）。"""
-    for p in tc.findall(qn("w:p")):
-        for r in list(p.findall(qn("w:r"))):
-            p.remove(r)
+def _set_tc_text(tc, text: str, rPr_source=None):
+    """直接在tc元素上设置文本，保留原有格式。
+    
+    策略：保留第一个w:r的w:rPr（格式属性），只修改文本内容。
+    如果没有w:r但有rPr_source，则从源复制格式。
+    """
     paragraphs = tc.findall(qn("w:p"))
-    if paragraphs:
-        r_elem = paragraphs[0].makeelement(qn("w:r"), {})
+    if not paragraphs:
+        # 没有段落则创建
+        p_elem = tc.makeelement(qn("w:p"), {})
+        tc.append(p_elem)
+        paragraphs = [p_elem]
+    
+    p = paragraphs[0]
+    runs = p.findall(qn("w:r"))
+    
+    if runs:
+        # 保留第一个run的格式（rPr），清空其文本，设置新文本
+        first_run = runs[0]
+        # 保存rPr
+        rPr = first_run.find(qn("w:rPr"))
+        
+        # 移除所有现有run
+        for r in list(runs):
+            p.remove(r)
+        
+        # 创建新run，复制原有格式
+        new_run = p.makeelement(qn("w:r"), {})
+        if rPr is not None:
+            new_run.append(copy.deepcopy(rPr))
+        t_elem = new_run.makeelement(qn("w:t"), {})
+        t_elem.text = str(text)
+        # 保留空格
+        t_elem.set(qn("xml:space"), "preserve")
+        new_run.append(t_elem)
+        p.append(new_run)
+    else:
+        # 没有现有run，创建新的
+        r_elem = p.makeelement(qn("w:r"), {})
+        # 如果提供了格式源，复制格式
+        if rPr_source is not None:
+            # rPr_source 可以是 w:rPr 元素或 w:tc 元素
+            if rPr_source.tag == qn("w:rPr"):
+                r_elem.append(copy.deepcopy(rPr_source))
+            else:
+                src_rPr = rPr_source.find(qn("w:rPr"))
+                if src_rPr is not None:
+                    r_elem.append(copy.deepcopy(src_rPr))
         t_elem = r_elem.makeelement(qn("w:t"), {})
         t_elem.text = str(text)
+        t_elem.set(qn("xml:space"), "preserve")
         r_elem.append(t_elem)
-        paragraphs[0].append(r_elem)
+        p.append(r_elem)
 
 
-def _set_cell_text(cell, text: str):
-    """设置单元格文本（清空后写入）。"""
-    _set_tc_text(cell._element, text)
+def _set_cell_text(cell, text: str, rPr_source=None):
+    """设置单元格文本（清空后写入），保留格式。"""
+    _set_tc_text(cell._element, text, rPr_source=rPr_source)
 
 
 def _append_value_to_tc_after_label(tc, label: str, value: str):
@@ -177,16 +218,46 @@ def _fill_checkbox_row(unique_cells, group, user_value):
     selected = [v.strip() for v in user_value.replace("，", ",").split(",")]
     option_blanks = group["option_blanks"]
     
+    # 找到同行中第一个有格式的cell作为格式源
+    rPr_source = None
+    for cell in unique_cells:
+        tc = cell._element
+        for p in tc.findall(qn("w:p")):
+            for r in p.findall(qn("w:r")):
+                rPr = r.find(qn("w:rPr"))
+                if rPr is not None:
+                    rPr_source = rPr
+                    break
+            if rPr_source is not None:
+                break
+        if rPr_source is not None:
+            break
+    
     for opt_text, blank_idx in option_blanks.items():
         if opt_text in selected:
-            _set_cell_text(unique_cells[blank_idx], "√")
+            _set_cell_text(unique_cells[blank_idx], "√", rPr_source=rPr_source)
         # 未选中的空白格保持空白
 
 
 # ── 标签字段填充 ──
 
+def _find_label_rPr_in_row(tr):
+    """从一行中找到第一个有rPr格式的标签格，返回其rPr元素（深拷贝）。
+    
+    用于空白格填充时继承同行标签格的字体/字号等格式。
+    """
+    tcs = tr.findall(qn("w:tc"))
+    for tc in tcs:
+        for p in tc.findall(qn("w:p")):
+            for r in p.findall(qn("w:r")):
+                rPr = r.find(qn("w:rPr"))
+                if rPr is not None:
+                    return rPr
+    return None
+
+
 def _fill_label_fields(doc, label_fields, data):
-    """填充标签字段，支持多种填充模式。"""
+    """填充标签字段，支持多种填充模式。保留原有格式。"""
     for f in label_fields:
         label = f["label"]
         if label not in data:
@@ -206,10 +277,12 @@ def _fill_label_fields(doc, label_fields, data):
                 tr = table.rows[ri]._tr
                 tcs = tr.findall(qn("w:tc"))
                 if col_idx < len(tcs):
-                    _set_tc_text(tcs[col_idx], str(value))
+                    # 获取同行标签格的格式作为格式源
+                    rPr_source = _find_label_rPr_in_row(tr)
+                    _set_tc_text(tcs[col_idx], str(value), rPr_source=rPr_source)
             
             elif fill_mode == "replace":
-                # 占位符替换模式：清空格内容后写入新值
+                # 占位符替换模式：清空格内容后写入新值（保留原run格式）
                 col_idx = f["col_idx"]
                 tr = table.rows[ri]._tr
                 tcs = tr.findall(qn("w:tc"))
@@ -315,7 +388,8 @@ def _fill_simple_row_groups(doc, groups, data):
                 
                 # 空白格或占位符格：填入数据
                 if not text or text in ("%", "…", "……"):
-                    _set_tc_text(tc, str(row_data[data_idx]))
+                    rPr_source = _find_label_rPr_in_row(tr)
+                    _set_tc_text(tc, str(row_data[data_idx]), rPr_source=rPr_source)
                     data_idx += 1
                 else:
                     # 有文字的格：如果不是标签则跳过
@@ -664,6 +738,89 @@ def _build_report_docx(template_path: str, user_data: dict) -> bytes:
     return content
 
 
+def _fill_custom_template(template_path: str, user_data: dict) -> bytes:
+    """通用模板纯填充：只向空白格/待填格写入文本，绝不改变文档格式。
+    
+    与 _build_report_docx 的区别：
+    - 不调用 _expand_report_data（内置模板专用扩展逻辑）
+    - 直接将用户数据映射到识别出的字段位置
+    - 完整保留原有字体、字号、加粗、对齐等格式
+    """
+    analysis = analyze_template(template_path)
+    doc = Document(template_path)
+    
+    # 1. 构建勾选框行检测，排除冲突的标签字段
+    checkbox_blank_cells = set()
+    for t_idx, table in enumerate(doc.tables):
+        for r_idx, row in enumerate(table.rows):
+            unique = _get_unique_cells(row)
+            groups = _detect_checkbox_row(unique)
+            for g in groups:
+                for ci in g["option_blanks"].values():
+                    checkbox_blank_cells.add((t_idx, r_idx, ci))
+    
+    # 过滤掉勾选框空白格位置的label字段
+    filtered_fields = []
+    for f in analysis["label_fields"]:
+        t_idx = f["table_idx"]
+        skip = False
+        for r_idx in f["row_indices"]:
+            if (t_idx, r_idx, f["col_idx"]) in checkbox_blank_cells:
+                skip = True
+                break
+        if not skip:
+            filtered_fields.append(f)
+    
+    # 2. 填充标签字段（直接用用户数据，不做expand）
+    _fill_label_fields(doc, filtered_fields, user_data)
+    
+    # 3. 填充勾选框行
+    _fill_checkbox_rows_in_table(doc, analysis, user_data)
+    
+    # 4. 填充行组（直接用用户数据中的行组）
+    _fill_simple_row_groups(doc, analysis["row_groups"], user_data)
+    
+    # 5. 填充多列字段（multi_col字段，如评价报告中的课程目标表）
+    for f in analysis["label_fields"]:
+        if f.get("pattern") == "multi_col" and f["label"] in user_data:
+            _fill_multi_col_field(doc, f, user_data[f["label"]])
+    
+    # 保存
+    tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    doc.save(tmp.name)
+    tmp.seek(0)
+    content = tmp.read()
+    tmp.close()
+    os.unlink(tmp.name)
+    
+    return content
+
+
+def _fill_multi_col_field(doc, field, value):
+    """填充multi_col模式字段（一行内多个待填列）。"""
+    t_idx = field["table_idx"]
+    table = doc.tables[t_idx]
+    
+    # value可能是逗号分隔字符串或列表
+    if isinstance(value, str):
+        values = [v.strip() for v in value.replace("，", ",").split(",")]
+    else:
+        values = list(value)
+    
+    # 获取可填充列索引
+    fillable_cols = field.get("fillable_cols", [])
+    
+    for i, col_idx in enumerate(fillable_cols):
+        if i >= len(values):
+            break
+        for ri in field["row_indices"]:
+            tr = table.rows[ri]._tr
+            tcs = tr.findall(qn("w:tc"))
+            if col_idx < len(tcs):
+                rPr_source = _find_label_rPr_in_row(tr)
+                _set_tc_text(tcs[col_idx], str(values[i]), rPr_source=rPr_source)
+
+
 # ── 工具函数 ──
 
 @tool
@@ -880,16 +1037,8 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         
         data = json.loads(report_data)
         
-        # 扩展用户数据到内部子字段
-        expanded = _expand_report_data(full_path, data)
-        
-        # 行组数据直接使用
-        for g in analyze_template(full_path)['row_groups']:
-            gid = g['group_id']
-            if gid in data and gid not in expanded:
-                expanded[gid] = data[gid]
-        
-        doc_bytes = _build_report_docx(full_path, expanded)
+        # 通用模板：直接填充，不调用expand（保留原格式）
+        doc_bytes = _fill_custom_template(full_path, data)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
