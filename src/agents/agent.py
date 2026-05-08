@@ -37,29 +37,45 @@ class AgentState(MessagesState):
     messages: Annotated[list[AnyMessage], _windowed_messages]
 
 
-def build_agent(ctx=None):
-    workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-    config_path = os.path.join(workspace_path, LLM_CONFIG)
+def _build_llm(cfg, ctx=None):
+    """根据环境变量构建LLM，支持3种模式：
+    1. Anthropic Claude（ANTHROPIC_API_KEY）
+    2. OpenAI兼容外部API（EXTERNAL_LLM_API_KEY + EXTERNAL_LLM_BASE_URL）
+    3. 平台内置模型（默认）
+    """
+    # 模式1: Anthropic Claude（原生API）
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        from langchain_anthropic import ChatAnthropic
+        model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+        return ChatAnthropic(
+            model=model,
+            api_key=anthropic_key,
+            temperature=cfg["config"].get("temperature", 0.7),
+            streaming=True,
+            timeout=cfg["config"].get("timeout", 600),
+            max_tokens=cfg["config"].get("max_completion_tokens", 10000),
+        ), model
 
-    with open(config_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
-    # 支持外部模型API：设置 EXTERNAL_LLM_API_KEY 即可切换
-    # 例如 DeepSeek: EXTERNAL_LLM_API_KEY=sk-xxx EXTERNAL_LLM_BASE_URL=https://api.deepseek.com
+    # 模式2: OpenAI兼容外部API（DeepSeek / OpenRouter / 硅基流动 等）
     ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
     ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
-
     if ext_api_key and ext_base_url:
-        # 使用外部模型API（如 DeepSeek）
-        api_key = ext_api_key
-        base_url = ext_base_url
         model = os.getenv("EXTERNAL_LLM_MODEL", "deepseek-chat")
-    else:
-        # 使用平台内置模型
-        api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
-        base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
-        model = cfg["config"].get("model", "doubao-seed-1-6-251015")
+        llm = ChatOpenAI(
+            model=model,
+            api_key=ext_api_key,
+            base_url=ext_base_url,
+            temperature=cfg["config"].get("temperature", 0.7),
+            streaming=True,
+            timeout=cfg["config"].get("timeout", 600),
+        )
+        return llm, model
 
+    # 模式3: 平台内置模型
+    api_key = os.getenv("COZE_WORKLOAD_IDENTITY_API_KEY")
+    base_url = os.getenv("COZE_INTEGRATION_MODEL_BASE_URL")
+    model = cfg["config"].get("model", "doubao-seed-1-6-251015")
     llm = ChatOpenAI(
         model=model,
         api_key=api_key,
@@ -71,9 +87,20 @@ def build_agent(ctx=None):
             "thinking": {
                 "type": cfg["config"].get("thinking", "disabled")
             }
-        } if not ext_api_key else {},  # 外部API不需要thinking参数
-        default_headers=default_headers(ctx) if ctx and not ext_api_key else {},
+        },
+        default_headers=default_headers(ctx) if ctx else {},
     )
+    return llm, model
+
+
+def build_agent(ctx=None):
+    workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    config_path = os.path.join(workspace_path, LLM_CONFIG)
+
+    with open(config_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    llm, model_name = _build_llm(cfg, ctx)
 
     return create_agent(
         model=llm,
