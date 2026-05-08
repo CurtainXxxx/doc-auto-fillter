@@ -41,7 +41,6 @@ dependencies = [
     "PyGObject==3.48.2",
     "python-multipart>=0.0.26",
     "pypdf2>=3.0.1",
-    "langchain-anthropic>=1.4.3",
 ]
 
 [tool.uv]

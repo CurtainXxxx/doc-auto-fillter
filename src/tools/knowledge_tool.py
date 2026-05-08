@@ -177,27 +177,13 @@ def _llm_extract_fields(field_list: list, file_content: str, ctx=None) -> dict:
 只返回JSON，不要其他文字。"""
 
     try:
-        # 支持3种模型：Anthropic Claude / OpenAI兼容外部API / 平台内置
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        # 支持外部模型API（如 DeepSeek）
+        ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
+        ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
 
-        if anthropic_key:
-            # 模式1: Anthropic Claude
-            from langchain_anthropic import ChatAnthropic
-            from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
-            anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-            claude_llm = ChatAnthropic(
-                model=anthropic_model,
-                api_key=anthropic_key,
-                temperature=0.1,
-                max_tokens=4096,
-            )
-            response = claude_llm.invoke([SM(content=system_prompt), HM(content=user_prompt)])
-            content_str = response.content if isinstance(response.content, str) else str(response.content)
-
-        elif (ext_api_key := os.getenv("EXTERNAL_LLM_API_KEY")) and (ext_base_url := os.getenv("EXTERNAL_LLM_BASE_URL")):
-            # 模式2: OpenAI兼容外部API（DeepSeek / OpenRouter 等）
+        if ext_api_key and ext_base_url:
+            # 使用外部API
             from langchain_openai import ChatOpenAI
-            from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
             ext_model = os.getenv("EXTERNAL_LLM_MODEL", "deepseek-chat")
             ext_llm = ChatOpenAI(
                 model=ext_model,
@@ -206,11 +192,11 @@ def _llm_extract_fields(field_list: list, file_content: str, ctx=None) -> dict:
                 temperature=0.1,
                 max_tokens=4096,
             )
+            from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
             response = ext_llm.invoke([SM(content=system_prompt), HM(content=user_prompt)])
-            content_str = response.content if isinstance(response.content, str) else str(response.content)
-
+            content = response.content
         else:
-            # 模式3: 平台内置LLM
+            # 使用平台内置LLM
             client = LLMClient(ctx=ctx)
             messages = [
                 SystemMessage(content=system_prompt),
@@ -224,16 +210,16 @@ def _llm_extract_fields(field_list: list, file_content: str, ctx=None) -> dict:
             )
             content = response.content
             # type: ignore 响应内容可能为list或str
-            content_str_v: str = ""
+            content_str: str = ""
             if isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict) and "text" in item:
-                        content_str_v += item["text"]
-                    elif isinstance(item, str):
-                        content_str_v += item
+                content_str = " ".join(
+                    item.get("text", "") for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                )
+            elif isinstance(content, str):
+                content_str = content
             else:
-                content_str_v = str(content)
-            content_str = content_str_v
+                content_str = str(content)
 
         # 提取JSON部分
         content_str = content_str.strip()
