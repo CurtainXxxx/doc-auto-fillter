@@ -10,6 +10,8 @@ _workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
 load_dotenv(os.path.join(_workspace, ".env"), override=True)
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import wrap_tool_call
+from langchain.messages import ToolMessage, AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import MessagesState
 from langgraph.graph.message import add_messages
@@ -28,13 +30,44 @@ LLM_CONFIG = "config/agent_llm_config.json"
 MAX_MESSAGES = 40
 
 
+def _strip_reasoning(msg):
+    """清理 DeepSeek 等模型返回的 reasoning_content，防止多轮对话报错"""
+    if not isinstance(msg, AIMessage):
+        return msg
+    rc = getattr(msg, "reasoning_content", None)
+    if not rc:
+        return msg
+    # 直接删除 reasoning_content 属性，而不是重建消息对象（避免丢失 id/tool_calls 关联）
+    try:
+        delattr(msg, "reasoning_content")
+    except Exception:
+        pass
+    # 同时清理 additional_kwargs 中的 reasoning_content
+    if hasattr(msg, "additional_kwargs") and "reasoning_content" in msg.additional_kwargs:
+        msg.additional_kwargs.pop("reasoning_content", None)
+    return msg
+
+
 def _windowed_messages(old, new):
-    """滑动窗口: 只保留最近 MAX_MESSAGES 条消息"""
-    return add_messages(old, new)[-MAX_MESSAGES:]  # type: ignore
+    """滑动窗口: 只保留最近 MAX_MESSAGES 条消息，并清理 reasoning_content"""
+    merged = add_messages(old, new)[-MAX_MESSAGES:]  # type: ignore
+    return [_strip_reasoning(m) for m in merged]
 
 
 class AgentState(MessagesState):
     messages: Annotated[list[AnyMessage], _windowed_messages]
+
+
+@wrap_tool_call
+def handle_tool_errors(request, handler):
+    """工具执行错误处理"""
+    try:
+        return handler(request)
+    except Exception as e:
+        return ToolMessage(
+            content=f"工具执行出错: ({str(e)})",
+            tool_call_id=request.tool_call["id"]
+        )
 
 
 def build_agent(ctx=None):
@@ -45,7 +78,6 @@ def build_agent(ctx=None):
         cfg = json.load(f)
 
     # 支持外部模型API：设置 EXTERNAL_LLM_API_KEY 即可切换
-    # 例如 DeepSeek: EXTERNAL_LLM_API_KEY=sk-xxx EXTERNAL_LLM_BASE_URL=https://api.deepseek.com
     ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
     ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
 
@@ -67,11 +99,13 @@ def build_agent(ctx=None):
         temperature=cfg["config"].get("temperature", 0.7),
         streaming=True,
         timeout=cfg["config"].get("timeout", 600),
-        extra_body={
-            "thinking": {
-                "type": cfg["config"].get("thinking", "disabled")
+        extra_body=(
+            {"thinking": {"type": "disabled"}} if ext_api_key else {
+                "thinking": {
+                    "type": cfg["config"].get("thinking", "disabled")
+                }
             }
-        } if not ext_api_key else {},  # 外部API不需要thinking参数
+        ),
         default_headers=default_headers(ctx) if ctx and not ext_api_key else {},
     )
 
@@ -82,4 +116,5 @@ def build_agent(ctx=None):
                parse_knowledge_file, analyze_uploaded_template, generate_from_template],
         checkpointer=get_memory_saver(),
         state_schema=AgentState,
+        middleware=[handle_tool_errors],
     )
