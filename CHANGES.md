@@ -1,5 +1,77 @@
 # 修改说明
 
+## 版本 1.1.0 - 任意模板自动填写 + 关键Bug修复 (2026-05-10)
+
+### Coze测试反馈修复 (2026-05-10 第二轮)
+
+#### 7. 修复 Agent 输出原始 JSON 过长
+- 系统提示词新增严格规则：**严禁**输出工具返回的原始JSON/数据
+- analyze_uploaded_template 返回几十个字段时，只告知总数和关键字段类型
+- **Why**: Agent 把92个字段的完整JSON输出给用户，严重影响交互体验
+
+#### 8. 修复 `_simplify_fields` 不支持动态列数
+- 从硬编码 `_第1列`~`_第5列` 改为正则 `_第\d+列` 动态匹配
+- 支持任意宽度的表格（如26列的试题号表格）
+- 同步修复 `_expand_report_data` 使用相同正则
+- 限制 `sub_labels` 显示数量（最多10个），避免输出过长
+- **Why**: 原代码只处理前5列，第6~26列变成垃圾字段标签如"课程目标1_第26列"
+
+#### 9. 修复 `_fill_simple_row_groups` 产生重复行
+- 数据行数超过模板行数时，先尝试复用后续已存在的空行
+- 只有真的不够用时才复制行
+- **Why**: 二次提醒后生成文档出现试题号行重复4次、评价数据行重复，因盲目复制行导致
+
+### 新增功能
+
+#### 1. `auto_fill_from_knowledge` 工具 (`src/tools/edu_report_tool.py`)
+一键自动填写：分析模板字段 → 从知识文件批量提取信息 → 填充生成文档。
+- 支持多个知识文件（逗号分隔路径）
+- LLM批量提取所有字段值，返回已填/未填字段
+- 前端上传模板+知识文件后自动触发
+
+#### 2. `_expand_custom_data` 函数 (`src/tools/edu_report_tool.py`)
+为自定义模板展开用户数据中的分组字段。
+- `"人数": "45,43,2"` → `"人数_第1列": "45", "人数_第2列": "43", ...`
+- 支持逗号分隔字符串和列表
+- 自动匹配模糊字段名
+
+### Bug修复
+
+#### 3. 修复 `_fill_multi_col_field` 填充链路 (`src/tools/edu_report_tool.py`)
+- `_detect_multi_column_fields` 不再只创建单字段，同时存储 `fillable_cols`
+- `_fill_custom_template` 先调用 `_expand_custom_data` 展开分组数据
+- 展开后的数据由 `_fill_label_fields` 逐个填充
+
+#### 4. 修复 `/upload-template` 表格解析 (`src/main.py`)
+- 从 `row.cells` (合并单元格缓存Bug) 改为 lxml `tr.findall(qn('w:tc'))`
+- 与 `knowledge_tool.py` 的表格解析保持一致
+
+#### 5. 修复 `/upload` 文件生命周期 (`src/main.py`)
+- 知识文件从临时路径改为持久路径 (`uploads/` 目录)
+- 返回 `file_path` 供 `auto_fill_from_knowledge` 工具引用
+
+### 前端改进 (`web/index.html`)
+
+#### 6. 自动填写触发逻辑
+- 追踪 `currentTemplatePath` 和 `knowledgeFilePaths`
+- 模板+知识文件都上传后自动提示Agent调用 `auto_fill_from_knowledge`
+- 欢迎消息更新为说明新功能
+
+### 系统提示词更新 (`config/agent_llm_config.json`)
+
+- 新增「自动填写流程」章节
+- 添加 `auto_fill_from_knowledge` 工具说明
+- 引导Agent在上传模板+知识文件后优先使用一键填写
+
+### 影响范围
+- `src/tools/edu_report_tool.py` - 新增 `_expand_custom_data`, `auto_fill_from_knowledge`；修复 `_fill_multi_col_field`, `_fill_custom_template`
+- `src/main.py` - 修复 `/upload-template` 表格解析；修复 `/upload` 文件持久化
+- `src/agents/agent.py` - 注册 `auto_fill_from_knowledge`
+- `config/agent_llm_config.json` - 系统提示词和工具列表更新
+- `web/index.html` - 文件路径追踪和自动触发
+
+---
+
 ## 版本 1.0.1 - 核心填充逻辑修复 (2026-05-07)
 
 ### 修复 1：`_set_tc_text` 彻底重写 (`src/tools/edu_report_tool.py`)
