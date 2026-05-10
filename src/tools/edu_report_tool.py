@@ -426,6 +426,182 @@ def _fill_simple_row_groups(doc, groups, data):
 
 # ── 用户字段简化 ──
 
+def _simplify_generic_fields(label_fields):
+    """通用字段简化：自动识别前缀归组，将92+个内部字段压缩为用户友好的少量字段。
+    
+    归组规则：
+    1. "前缀_数字" 模式 → 归为"前缀"组（如 课程目标1_1, 课程目标1_2 → 课程目标1）
+    2. "前缀_第N列" 模式 → 归入已有组（如 课程目标2_第6列 → 课程目标2）
+    3. 已有group类型字段 → 保留
+    4. 单独字段 → 直接保留
+    """
+    import re
+    
+    # ── 第1步：识别所有字段的基础前缀 ──
+    # 模式: "课程目标1_1" → base="课程目标1", sub="1"
+    # 模式: "课程目标2_第6列" → base="课程目标2", sub="第6列"
+    # 模式: "期末考试_课程目标" → base="期末考试", sub="课程目标"
+    
+    groups = {}       # base_label → {"type", "sub_labels", "sub_fields" / "field"}
+    field_order = []  # 保持字段出现顺序
+    
+    # 列索引后缀（不单独成字段，归入父组）
+    col_suffixes_re = re.compile(r'^(第\d+列|第\d+格)$')
+    # 纯数字后缀
+    num_suffixes_re = re.compile(r'^(\d+)$')
+    
+    for f in label_fields:
+        label = f["label"]
+        
+        # 如果字段本身就是group类型（template_analyzer识别的multi_col字段），直接保留
+        if f.get("fill_mode") == "group":
+            if label not in groups:
+                field_order.append(label)
+            groups[label] = {
+                "type": "group",
+                "base_label": label,
+                "sub_labels": f.get("sub_labels", []),
+                "sub_fields": [f],
+            }
+            continue
+        
+        # 尝试按下划线拆分
+        parts = label.split("_", 1)
+        if len(parts) == 2:
+            base, suffix = parts
+            
+            # 判断后缀是否应该归组
+            should_group = (
+                col_suffixes_re.match(suffix) or   # 第N列
+                num_suffixes_re.match(suffix) or   # 纯数字
+                suffix in ("课程目标", "实现途径", "评价方法",  # 语义子字段
+                           "实际平均分", "目标达成评价值") or
+                any(k in suffix for k in ["列", "题", "列"])
+            )
+            
+            if should_group:
+                if base in groups:
+                    # 追加到已有组
+                    if groups[base]["type"] == "single":
+                        # 升级single → group
+                        existing = groups[base]["field"]
+                        groups[base] = {
+                            "type": "group",
+                            "base_label": base,
+                            "sub_labels": [base, suffix],
+                            "sub_fields": [existing, f],
+                        }
+                    else:
+                        groups[base]["sub_labels"].append(suffix)
+                        groups[base]["sub_fields"].append(f)
+                else:
+                    field_order.append(base)
+                    groups[base] = {
+                        "type": "group",
+                        "base_label": base,
+                        "sub_labels": [suffix],
+                        "sub_fields": [f],
+                    }
+                continue
+        
+        # 未匹配归组规则 → 独立字段
+        if label not in groups:
+            field_order.append(label)
+            groups[label] = {
+                "type": "single",
+                "base_label": label,
+                "field": f,
+            }
+    
+    # ── 第2步：合并连续的列索引子字段为范围描述 ──
+    # 如 sub_labels=["1","2","3","4","5","第6列",...,"第26列"] 
+    # → sub_labels=["数据1~5", "数据6~26"]
+    
+    user_fields = []
+    for label in field_order:
+        g = groups[label]
+        if g["type"] == "single":
+            f = g["field"]
+            user_fields.append({
+                "label": f["label"],
+                "description": f.get("description", f"请填写{f['label']}"),
+                "fill_mode": f.get("fill_mode", "set"),
+            })
+        else:
+            subs = g["sub_labels"]
+            base = g["base_label"]
+            
+            # 压缩子标签：将连续的列索引合并
+            compressed = _compress_sub_labels(subs)
+            
+            user_fields.append({
+                "label": base,
+                "description": f"请填写{base}的相关数据",
+                "fill_mode": "group",
+                "sub_labels": compressed,
+            })
+    
+    return user_fields
+
+
+def _compress_sub_labels(subs):
+    """压缩子标签列表：连续的列索引用范围表示。
+    
+    ["1","2","3","4","5","第6列","第7列",...,"第26列"]
+    → ["数据1~5", "数据6~26"]
+    """
+    if len(subs) <= 5:
+        return subs
+    
+    import re
+    num_re = re.compile(r'^(\d+)$')
+    col_re = re.compile(r'^第(\d+)列$')
+    
+    # 分类：纯数字 vs 列索引 vs 其他
+    num_items = []   # (index, value, sort_key)
+    col_items = []   # (index, value, sort_key)
+    other_items = [] # (index, value)
+    
+    for i, s in enumerate(subs):
+        m = num_re.match(s)
+        if m:
+            num_items.append((i, s, int(m.group(1))))
+            continue
+        m = col_re.match(s)
+        if m:
+            col_items.append((i, s, int(m.group(1))))
+            continue
+        other_items.append((i, s))
+    
+    result = []
+    
+    # 纯数字范围
+    if num_items:
+        sorted_nums = sorted(num_items, key=lambda x: x[2])
+        min_n = sorted_nums[0][2]
+        max_n = sorted_nums[-1][2]
+        if max_n - min_n + 1 == len(sorted_nums):
+            result.append(f"数据{min_n}~{max_n}（共{len(sorted_nums)}项）")
+        else:
+            result.append(f"数据{len(sorted_nums)}项")
+    
+    # 列索引范围
+    if col_items:
+        sorted_cols = sorted(col_items, key=lambda x: x[2])
+        min_c = sorted_cols[0][2]
+        max_c = sorted_cols[-1][2]
+        if max_c - min_c + 1 == len(sorted_cols):
+            result.append(f"第{min_c}列~第{max_c}列（共{len(sorted_cols)}项）")
+        else:
+            result.append(f"列数据{len(sorted_cols)}项")
+    
+    # 其他
+    for _, s in other_items:
+        result.append(s)
+    
+    return result if result else subs
+
+
 def _simplify_fields(label_fields):
     """将内部字段列表简化为用户友好的字段列表。
     
@@ -732,16 +908,54 @@ def _build_report_docx(template_path: str, user_data: dict) -> bytes:
     return content
 
 
+def _expand_generic_data(label_fields, user_data):
+    """将通用模板中归组字段的逗号分隔值展开成内部子字段名。
+    
+    例: 用户输入 {"课程目标1": "0.8,0.7,0.6,..."} 
+    → {"课程目标1_1": "0.8", "课程目标1_2": "0.7", ...}
+    """
+    expanded = dict(user_data)
+    
+    # 收集所有归组前缀及其子字段
+    groups = {}  # base_label -> [(sub_field_label, sub_field)]
+    for f in label_fields:
+        label = f["label"]
+        for sep in ("_", "·"):
+            if sep in label:
+                base, sub = label.split(sep, 1)
+                if base not in groups:
+                    groups[base] = []
+                groups[base].append((label, f))
+                break
+    
+    # 对每个归组，展开用户数据
+    for base, subs in groups.items():
+        if base in user_data and isinstance(user_data[base], str):
+            values = [v.strip() for v in user_data[base].split(",")]
+            # 按子字段顺序赋值
+            for i, (sub_label, sub_f) in enumerate(subs):
+                if i < len(values) and values[i]:
+                    expanded[sub_label] = values[i]
+            # 删除原始归组键（避免重复填充）
+            if base in expanded:
+                del expanded[base]
+    
+    return expanded
+
+
 def _fill_custom_template(template_path: str, user_data: dict) -> bytes:
     """通用模板纯填充：只向空白格/待填格写入文本，绝不改变文档格式。
     
     与 _build_report_docx 的区别：
     - 不调用 _expand_report_data（内置模板专用扩展逻辑）
-    - 直接将用户数据映射到识别出的字段位置
+    - 使用 _expand_generic_data 展开通用归组字段
     - 完整保留原有字体、字号、加粗、对齐等格式
     """
     analysis = analyze_template(template_path)
     doc = Document(template_path)
+    
+    # 0. 展开归组字段数据
+    expanded_data = _expand_generic_data(analysis["label_fields"], user_data)
     
     # 1. 构建勾选框行检测，排除冲突的标签字段
     checkbox_blank_cells = set()
@@ -765,19 +979,19 @@ def _fill_custom_template(template_path: str, user_data: dict) -> bytes:
         if not skip:
             filtered_fields.append(f)
     
-    # 2. 填充标签字段（直接用用户数据，不做expand）
-    _fill_label_fields(doc, filtered_fields, user_data)
+    # 2. 填充标签字段（使用展开后的数据）
+    _fill_label_fields(doc, filtered_fields, expanded_data)
     
     # 3. 填充勾选框行
-    _fill_checkbox_rows_in_table(doc, analysis, user_data)
+    _fill_checkbox_rows_in_table(doc, analysis, expanded_data)
     
-    # 4. 填充行组（直接用用户数据中的行组）
-    _fill_simple_row_groups(doc, analysis["row_groups"], user_data)
+    # 4. 填充行组（使用展开后的数据）
+    _fill_simple_row_groups(doc, analysis["row_groups"], expanded_data)
     
     # 5. 填充多列字段（multi_col字段，如评价报告中的课程目标表）
     for f in analysis["label_fields"]:
-        if f.get("pattern") == "multi_col" and f["label"] in user_data:
-            _fill_multi_col_field(doc, f, user_data[f["label"]])
+        if f.get("pattern") == "multi_col" and f["label"] in expanded_data:
+            _fill_multi_col_field(doc, f, expanded_data[f["label"]])
     
     # 保存
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
@@ -957,7 +1171,8 @@ def analyze_uploaded_template(file_path: str) -> str:
             return json.dumps({"success": False, "message": f"文件不存在: {file_path}"}, ensure_ascii=False)
         
         analysis = analyze_template(full_path)
-        user_fields = _simplify_fields(analysis['label_fields'])
+        # 通用模板使用通用简化函数（比_simplify_fields更智能地归组）
+        user_fields = _simplify_generic_fields(analysis['label_fields'])
         
         # 构建用户友好的字段描述
         field_descriptions = []
