@@ -10,39 +10,3 @@ __pycache__/
 *.a
 /vendor
 *.egg-info/
-/.env
-.env
-
-# 视频文件
-*.mp4
-*.avi
-*.mov
-*.wmv
-*.flv
-*.mkv
-*.webm
-*.m4v
-*.mpeg
-*.mpg
-*.3gp
-*.f4v
-*.rmvb
-*.vob
-
-# 归档文件
-*.iso
-*.dmg
-*.rar
-*.zip
-*.gz
-
-# 文档类也默认加入（但assets目录下的模板需要保留）
-*.pdf
-assets/**/*.docx
-assets/**/*.doc
-*.xlsx
-*.xls
-*.ppt
-*.pptx
-*.xlsx
-*.csv
