@@ -506,6 +506,18 @@ html, body {
   font-size: 13px; font-weight: 500; transition: background 0.15s;
 }
 .doc-done-card .dl-btn:hover { background: var(--primary-light); }
+.download-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; margin-bottom: 8px;
+  background: var(--success-bg); border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--success); font-weight: 500;
+}
+.download-banner .dl-btn {
+  margin-left: auto; padding: 4px 12px; font-size: 13px;
+  background: var(--primary); color: #fff; border-radius: var(--radius-sm);
+  text-decoration: none; white-space: nowrap;
+}
+.download-banner .dl-btn:hover { background: var(--primary-light); }
 .doc-done-card .checks {
   margin-top: 18px; text-align: left;
   background: var(--success-bg); border-radius: var(--radius-sm);
@@ -1025,18 +1037,39 @@ function updatePreview(state) {
 
     case 'done':
       title.textContent = '文档已生成';
-      body.innerHTML = `
-        <div class="doc-done-card">
-          <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
-          <h4>文档生成完成</h4>
-          <p>格式与模板一致</p>
-          <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">下载 Word 文档</a>
-          <div class="checks">
-            · 文档格式与模板一致<br>
-            · 所有字段已填入<br>
-            · 链接 24 小时内有效
-          </div>
-        </div>`;
+      if (docPreviewHtml && currentDownloadUrl) {
+        // 保留文档预览，在顶部添加下载提示条
+        const body = document.getElementById('previewBody');
+        const oldHtml = body.innerHTML;
+        body.innerHTML = `<div class="download-banner">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><path d="M5 13l4 4L19 7"/></svg>
+          <span>文档生成完成</span>
+          <a href="${currentDownloadUrl}" target="_blank" class="dl-btn" style="padding:4px 12px;font-size:13px;">下载Word文档</a>
+        </div>` + oldHtml.replace(/<div class="download-banner">[\s\S]*?<\/div>\s*/g, '');
+        document.getElementById('previewActions').style.display = 'flex';
+      } else if (currentDownloadUrl) {
+        body.innerHTML = `
+          <div class="doc-done-card">
+            <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
+            <h4>文档生成完成</h4>
+            <p>格式与模板一致</p>
+            <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">下载 Word 文档</a>
+            <div class="checks">
+              · 文档格式与模板一致<br>
+              · 所有字段已填入<br>
+              · 链接 24 小时内有效
+            </div>
+          </div>`;
+        document.getElementById('previewActions').style.display = 'flex';
+      } else {
+        body.innerHTML = `
+          <div class="doc-done-card">
+            <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
+            <h4>文档生成完成</h4>
+            <p>文档正在上传，请稍候...</p>
+          </div>`;
+        document.getElementById('previewActions').style.display = 'none';
+      }
       break;
 
     default:
