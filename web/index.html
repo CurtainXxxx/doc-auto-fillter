@@ -610,7 +610,6 @@ html, body {
       </div>
       <div class="actions" id="previewActions" style="display:none;">
         <button onclick="downloadDoc()">下载</button>
-        <button class="primary" onclick="window.open(currentDownloadUrl)">打开链接</button>
       </div>
     </div>
     <div class="preview-body" id="previewBody">
@@ -798,12 +797,29 @@ async function callAgent(userText) {
 
 // ── Detect field values from agent text & update document preview ──
 function detectAndUpdateFields(text) {
-  // 检测 "字段：值" 或 "字段:值" 格式
-  const kvMatches = text.matchAll(/[-–·]\s*(.+?)[：:]\s*(.+)/g);
+  // 去掉 markdown 加粗标记
+  const clean = text.replace(/\*\*/g, '');
+
+  // 匹配多种格式：
+  // 1. "字段：值" 或 "字段: 值"
+  // 2. "- 字段：值" 或 "· 字段：值"
+  // 3. "1. 字段：值" 数字编号
+  // 4. "**字段**：值"
+  const kvMatches = clean.matchAll(/(?:^|\n|[-–·•]\s*|\d+[.、)\]]\s*)([^\n：:]{1,30})[：:]\s*([^\n]+)/g);
   for (const m of kvMatches) {
-    const key = m[1].trim().replace(/\*+/g, '');
+    const key = m[1].trim().replace(/^[\s\-–·•\d.、)\]]+/,'').trim();
     const val = m[2].trim();
-    if (key && val && key.length < 20 && val.length < 200) {
+    if (key && val && key.length >= 2 && key.length < 20 && val.length < 200) {
+      updateFieldByLabel(key, val);
+    }
+  }
+
+  // 匹配"已收集/已填写"汇总格式：如 "课程名称=高等数学, 开课时间=2024-2025-1"
+  const eqMatches = clean.matchAll(/(\S{2,15})\s*[=＝]\s*([^,，\n]+)/g);
+  for (const m of eqMatches) {
+    const key = m[1].trim();
+    const val = m[2].trim();
+    if (key && val && val.length < 200) {
       updateFieldByLabel(key, val);
     }
   }
@@ -811,13 +827,57 @@ function detectAndUpdateFields(text) {
 
 // ── Update a field in the document preview by label name ──
 function updateFieldByLabel(label, value) {
-  // 查找 label 对应的 field_ids
-  const fids = labelToFields[label];
-  if (!fids || fids.length === 0) return;
+  // 1. 精确匹配
+  let fids = labelToFields[label];
+  if (fids && fids.length > 0) {
+    for (const fid of fids) {
+      fieldData[fid] = value;
+      updateCellInPreview(fid, value);
+    }
+    return;
+  }
 
-  for (const fid of fids) {
-    fieldData[fid] = value;
-    updateCellInPreview(fid, value);
+  // 2. 前缀匹配：如 label="课程目标1"，匹配 "课程目标1_1", "课程目标1_2" 等
+  // 值可能是逗号分隔的多个子字段值
+  const prefixKey = label + '_';
+  const subFids = [];
+  for (const [k, v] of Object.entries(labelToFields)) {
+    if (k.startsWith(prefixKey)) {
+      subFids.push(...v);
+    }
+  }
+  if (subFids.length > 0) {
+    // 按字段名排序（数字顺序）
+    const subLabels = Object.entries(labelToFields)
+      .filter(([k]) => k.startsWith(prefixKey))
+      .sort((a, b) => {
+        const na = parseInt(a[0].replace(prefixKey, '').replace('第','').replace('列',''));
+        const nb = parseInt(b[0].replace(prefixKey, '').replace('第','').replace('列',''));
+        return (isNaN(na) ? 999 : na) - (isNaN(nb) ? 999 : nb);
+      });
+    
+    // 拆分值：支持逗号、中文逗号、空格分隔
+    const values = value.split(/[,，\s]+/).filter(v => v.trim());
+    
+    for (let i = 0; i < subLabels.length; i++) {
+      const val = i < values.length ? values[i].trim() : '';
+      for (const fid of subLabels[i][1]) {
+        fieldData[fid] = val;
+        updateCellInPreview(fid, val);
+      }
+    }
+    return;
+  }
+
+  // 3. 部分匹配：label 包含在某个 key 中，或某个 key 包含 label
+  for (const [k, v] of Object.entries(labelToFields)) {
+    if (k.includes(label) || label.includes(k)) {
+      for (const fid of v) {
+        fieldData[fid] = value;
+        updateCellInPreview(fid, value);
+      }
+      return;
+    }
   }
 }
 
@@ -830,16 +890,30 @@ function updateCellInPreview(fieldId, value) {
     if (document.activeElement === el) continue;
 
     if (el.classList.contains('cell-value')) {
-      // 冒号字段的可编辑 span
+      // 冒号字段的可编辑 span —— 直接设置文本
       el.textContent = value;
       el.classList.toggle('filled', !!value.trim());
     } else if (el.classList.contains('editable')) {
-      // 整格可编辑的 td
-      el.textContent = value;
+      // 整格可编辑的 td —— 清除占位符再设置值
+      // 先移除 placeholder span（如果有）
+      const ph = el.querySelector('.placeholder');
+      if (ph) ph.remove();
+      // 保留现有 w:r 格式结构，只更新 w:t 文本
+      const wtEls = el.querySelectorAll('t');
+      if (wtEls.length > 0) {
+        // 有 w:t 元素（来自 docx HTML），更新第一个，清空其余
+        wtEls[0].textContent = value;
+        for (let i = 1; i < wtEls.length; i++) wtEls[i].textContent = '';
+      } else {
+        // 普通文本，直接设置
+        el.textContent = value;
+      }
       el.classList.remove('empty');
       el.classList.toggle('filled', !!value.trim());
     }
   }
+  // 更新进度条
+  refreshProgressBar();
 }
 
 // ── Post-process Response ──
@@ -970,9 +1044,8 @@ function renderDocPreview() {
   previewRendered = true;
 }
 
-// ── Refresh field values without re-rendering the whole document ──
-function refreshFieldValues() {
-  // Update progress
+// ── Refresh progress bar only (no cell updates, no recursion) ──
+function refreshProgressBar() {
   const totalFields = Object.keys(fieldMap).length;
   let filledCount = 0;
   for (const fid in fieldMap) {
@@ -983,7 +1056,11 @@ function refreshFieldValues() {
   const barText = document.querySelector('.bar-text');
   if (barFill) barFill.style.width = pct + '%';
   if (barText) barText.textContent = `${filledCount}/${totalFields} 已填写`;
+}
 
+// ── Refresh field values without re-rendering the whole document ──
+function refreshFieldValues() {
+  refreshProgressBar();
   // Update each field cell
   for (const [fid, val] of Object.entries(fieldData)) {
     updateCellInPreview(fid, val);
@@ -1044,7 +1121,7 @@ function updatePreview(state) {
         body.innerHTML = `<div class="download-banner">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><path d="M5 13l4 4L19 7"/></svg>
           <span>文档生成完成</span>
-          <a href="${currentDownloadUrl}" target="_blank" class="dl-btn" style="padding:4px 12px;font-size:13px;">下载Word文档</a>
+          <button onclick="downloadDoc()" class="dl-btn" style="padding:4px 12px;font-size:13px;cursor:pointer;border:none;">下载Word文档</button>
         </div>` + oldHtml.replace(/<div class="download-banner">[\s\S]*?<\/div>\s*/g, '');
         document.getElementById('previewActions').style.display = 'flex';
       } else if (currentDownloadUrl) {
@@ -1053,7 +1130,7 @@ function updatePreview(state) {
             <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
             <h4>文档生成完成</h4>
             <p>格式与模板一致</p>
-            <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">下载 Word 文档</a>
+            <button onclick="downloadDoc()" class="dl-btn" style="cursor:pointer;border:none;">下载 Word 文档</button>
             <div class="checks">
               · 文档格式与模板一致<br>
               · 所有字段已填入<br>
@@ -1190,7 +1267,16 @@ function highlightUploadBtn() {
 }
 
 function downloadDoc() {
-  if (currentDownloadUrl) window.open(currentDownloadUrl);
+  if (currentDownloadUrl) {
+    const a = document.createElement('a');
+    a.href = currentDownloadUrl;
+    a.download = '';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 }
 
 // ── Submit manually edited fields to agent ──
