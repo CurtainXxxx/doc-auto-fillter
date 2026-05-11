@@ -40,15 +40,12 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── Layout ── */
 .app {
   display: flex;
   height: 100vh;
   overflow: hidden;
-  gap: 0;
 }
 
-/* ── Left Panel: Chat ── */
 .chat-panel {
   width: 420px;
   min-width: 360px;
@@ -59,7 +56,6 @@ html, body {
   position: relative;
 }
 
-/* Header */
 .chat-header {
   padding: 14px 20px;
   display: flex;
@@ -89,7 +85,6 @@ html, body {
   background: var(--success);
 }
 
-/* Steps Bar */
 .steps-bar {
   display: flex;
   padding: 10px 16px;
@@ -130,25 +125,13 @@ html, body {
   z-index: 1;
 }
 .steps-bar .step:last-child::after { display: none; }
-.steps-bar .step.active {
-  color: var(--primary);
-  font-weight: 600;
-}
-.steps-bar .step.active::before {
-  background: var(--primary);
-  width: 9px; height: 9px;
-  top: -1px;
-}
+.steps-bar .step.active { color: var(--primary); font-weight: 600; }
+.steps-bar .step.active::before { background: var(--primary); width: 9px; height: 9px; top: -1px; }
 .steps-bar .step.active::after { background: var(--primary-light); }
-.steps-bar .step.done {
-  color: var(--success);
-}
-.steps-bar .step.done::before {
-  background: var(--success);
-}
+.steps-bar .step.done { color: var(--success); }
+.steps-bar .step.done::before { background: var(--success); }
 .steps-bar .step.done::after { background: var(--success); }
 
-/* Chat Messages */
 .chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -162,12 +145,7 @@ html, body {
 .chat-messages::-webkit-scrollbar-track { background: transparent; }
 .chat-messages::-webkit-scrollbar-thumb { background: #D0D5DD; border-radius: 4px; }
 
-/* Message Bubbles */
-.msg {
-  display: flex;
-  gap: 8px;
-  max-width: 100%;
-}
+.msg { display: flex; gap: 8px; max-width: 100%; }
 .msg.user { flex-direction: row-reverse; }
 
 .msg .avatar-icon {
@@ -178,14 +156,8 @@ html, body {
   font-size: 11px; font-weight: 700;
   align-self: flex-end;
 }
-.msg.assistant .avatar-icon {
-  background: var(--primary);
-  color: #fff;
-}
-.msg.user .avatar-icon {
-  background: #E5E7EB;
-  color: var(--text-secondary);
-}
+.msg.assistant .avatar-icon { background: var(--primary); color: #fff; }
+.msg.user .avatar-icon { background: #E5E7EB; color: var(--text-secondary); }
 
 .msg .bubble {
   max-width: 85%;
@@ -196,35 +168,15 @@ html, body {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.msg.assistant .bubble {
-  background: #F4F5F7;
-  color: var(--text);
-  border-bottom-left-radius: 3px;
-}
-.msg.user .bubble {
-  background: var(--primary);
-  color: #fff;
-  border-bottom-right-radius: 3px;
-}
+.msg.assistant .bubble { background: #F4F5F7; color: var(--text); border-bottom-left-radius: 3px; }
+.msg.user .bubble { background: var(--primary); color: #fff; border-bottom-right-radius: 3px; }
 
-/* Typing dots */
-.typing-dots {
-  display: inline-flex; gap: 4px; padding: 4px 2px;
-}
-.typing-dots span {
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  animation: bounce 1.4s infinite;
-}
+.typing-dots { display: inline-flex; gap: 4px; padding: 4px 2px; }
+.typing-dots span { width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted); animation: bounce 1.4s infinite; }
 .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
 .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-4px); opacity: 1; }
-}
+@keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: 0.4; } 30% { transform: translateY(-4px); opacity: 1; } }
 
-/* Download link in bubble */
 .download-link {
   display: inline-flex; align-items: center; gap: 5px;
   margin-top: 6px; padding: 6px 14px;
@@ -233,30 +185,18 @@ html, body {
   font-size: 12.5px; font-weight: 500;
   transition: background 0.15s;
 }
-.download-link:hover {
-  background: var(--primary-light);
-}
+.download-link:hover { background: var(--primary-light); }
 
-/* Choice box in bubble */
 .choice-box {
   margin-top: 8px; padding: 8px 12px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-size: 13px;
 }
-.choice-box .choice-title {
-  font-weight: 600; margin-bottom: 6px;
-  color: var(--primary); font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.choice-box label {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 6px; cursor: pointer;
-  border-radius: 4px; transition: background 0.1s;
-}
+.choice-box .choice-title { font-weight: 600; margin-bottom: 6px; color: var(--primary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+.choice-box label { display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer; border-radius: 4px; transition: background 0.1s; }
 .choice-box label:hover { background: var(--primary-lighter); }
 .choice-box input[type="radio"] { accent-color: var(--primary); }
 
-/* File card */
 .file-card {
   margin-top: 6px; padding: 8px 12px;
   background: var(--success-bg); border: 1px solid var(--success-border);
@@ -268,7 +208,6 @@ html, body {
 .file-card .file-name { font-weight: 500; color: var(--text); }
 .file-card .file-size { color: var(--text-secondary); font-size: 10.5px; }
 
-/* ── Function Panel ── */
 .func-panel {
   border-top: 1px solid var(--border);
   background: #FAFBFC;
@@ -292,45 +231,23 @@ html, body {
   color: var(--text);
   text-align: left;
 }
-.func-btn:hover {
-  border-color: var(--primary-light);
-  background: var(--primary-lighter);
-}
+.func-btn:hover { border-color: var(--primary-light); background: var(--primary-lighter); }
 .func-btn .func-icon {
-  font-size: 14px;
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  border-radius: 4px;
+  font-size: 14px; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: 4px;
   background: var(--primary-lighter);
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s;
-  color: var(--primary);
+  transition: all 0.15s; color: var(--primary);
 }
-.func-btn:hover .func-icon {
-  background: var(--primary);
-  color: #fff;
-}
+.func-btn:hover .func-icon { background: var(--primary); color: #fff; }
 .func-btn .func-text { line-height: 1.35; }
-.func-btn .func-text .title {
-  font-weight: 600; font-size: 12px; display: block;
-}
-.func-btn .func-text .desc {
-  font-size: 10px; color: var(--text-secondary);
-  display: block; margin-top: 1px;
-}
-
-.func-btn.active {
-  border-color: var(--primary);
-  background: var(--primary-lighter);
-}
-.func-btn.active .func-icon {
-  background: var(--primary);
-  color: #fff;
-}
+.func-btn .func-text .title { font-weight: 600; font-size: 12px; display: block; }
+.func-btn .func-text .desc { font-size: 10px; color: var(--text-secondary); display: block; margin-top: 1px; }
+.func-btn.active { border-color: var(--primary); background: var(--primary-lighter); }
+.func-btn.active .func-icon { background: var(--primary); color: #fff; }
 .func-btn.active .func-text .title { color: var(--primary); }
 .func-btn.active .func-text .desc { color: var(--primary-light); }
 
-/* ── Chat Input ── */
 .chat-input {
   padding: 10px 14px;
   border-top: 1px solid var(--border);
@@ -347,15 +264,8 @@ html, body {
   transition: all 0.15s; flex-shrink: 0;
   color: var(--text-secondary); position: relative; overflow: hidden;
 }
-.chat-input .upload-btn:hover {
-  border-color: var(--primary-light);
-  color: var(--primary);
-  background: var(--primary-lighter);
-}
-.chat-input .upload-btn input[type="file"] {
-  position: absolute; top: 0; left: 0;
-  width: 100%; height: 100%; opacity: 0; cursor: pointer;
-}
+.chat-input .upload-btn:hover { border-color: var(--primary-light); color: var(--primary); background: var(--primary-lighter); }
+.chat-input .upload-btn input[type="file"] { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .chat-input textarea {
   flex: 1; resize: none;
   border: 1px solid var(--border);
@@ -366,10 +276,7 @@ html, body {
   transition: border-color 0.15s;
   background: #FAFBFC;
 }
-.chat-input textarea:focus {
-  border-color: var(--primary);
-  background: var(--surface);
-}
+.chat-input textarea:focus { border-color: var(--primary); background: var(--surface); }
 .chat-input textarea::placeholder { color: var(--text-muted); }
 .chat-input .send-btn {
   width: 36px; height: 36px;
@@ -379,13 +286,9 @@ html, body {
   display: flex; align-items: center; justify-content: center;
   transition: background 0.15s; flex-shrink: 0;
 }
-.chat-input .send-btn:hover {
-  background: var(--primary-light);
-}
+.chat-input .send-btn:hover { background: var(--primary-light); }
 .chat-input .send-btn:active { opacity: 0.85; }
-.chat-input .send-btn:disabled {
-  background: #D1D5DB; cursor: not-allowed;
-}
+.chat-input .send-btn:disabled { background: #D1D5DB; cursor: not-allowed; }
 
 /* ── Right Panel: Preview ── */
 .preview-panel {
@@ -400,15 +303,9 @@ html, body {
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
 }
-.preview-header .title-area {
-  display: flex; align-items: center; gap: 8px;
-}
-.preview-header .title-area h3 {
-  font-size: 14px; font-weight: 600; color: var(--text);
-}
-.preview-header .actions {
-  display: flex; gap: 6px;
-}
+.preview-header .title-area { display: flex; align-items: center; gap: 8px; }
+.preview-header .title-area h3 { font-size: 14px; font-weight: 600; color: var(--text); }
+.preview-header .actions { display: flex; gap: 6px; }
 .preview-header .actions button {
   padding: 6px 14px;
   border: 1px solid var(--border);
@@ -420,17 +317,9 @@ html, body {
   color: var(--text-secondary);
   font-family: inherit;
 }
-.preview-header .actions button:hover {
-  border-color: var(--primary-light);
-  color: var(--primary);
-}
-.preview-header .actions button.primary {
-  background: var(--primary); color: #fff;
-  border-color: var(--primary);
-}
-.preview-header .actions button.primary:hover {
-  background: var(--primary-light);
-}
+.preview-header .actions button:hover { border-color: var(--primary-light); color: var(--primary); }
+.preview-header .actions button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.preview-header .actions button.primary:hover { background: var(--primary-light); }
 
 .preview-body {
   flex: 1; overflow: auto;
@@ -442,186 +331,175 @@ html, body {
 .preview-body::-webkit-scrollbar-track { background: transparent; }
 .preview-body::-webkit-scrollbar-thumb { background: #D0D5DD; border-radius: 4px; }
 
-/* Empty State */
-.empty-state {
-  text-align: center;
-  color: var(--text-secondary);
-  margin-top: 80px;
-  max-width: 300px;
-}
+.empty-state { text-align: center; color: var(--text-secondary); margin-top: 80px; max-width: 300px; }
 .empty-state .icon-wrap {
-  width: 56px; height: 56px;
-  border-radius: var(--radius);
+  width: 56px; height: 56px; border-radius: var(--radius);
   background: var(--primary-lighter);
   display: flex; align-items: center; justify-content: center;
   margin: 0 auto 14px;
 }
-.empty-state .icon-wrap svg {
-  width: 24px; height: 24px; color: var(--primary);
-}
-.empty-state h4 {
-  font-size: 15px; color: var(--text); margin-bottom: 6px;
-  font-weight: 600;
-}
-.empty-state p {
-  font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);
-}
+.empty-state .icon-wrap svg { width: 24px; height: 24px; color: var(--primary); }
+.empty-state h4 { font-size: 15px; color: var(--text); margin-bottom: 6px; font-weight: 600; }
+.empty-state p { font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); }
 
-/* Document Page Preview */
+/* ── Document Preview ── */
 .doc-page {
   background: var(--surface);
   box-shadow: var(--shadow-md);
   border-radius: var(--radius);
   width: 100%; max-width: 860px;
   min-height: 540px;
-  padding: 44px 52px;
-  font-family: "FangSong", "仿宋", "SimSun", "宋体", serif;
+  padding: 36px 44px;
   font-size: 12pt;
   line-height: 1.8;
   color: #1a1a1a;
 }
 .doc-page h2 {
-  text-align: center; font-size: 17pt;
-  margin-bottom: 24px; font-weight: normal;
-  letter-spacing: 2px; color: #000;
-}
-.doc-page table {
-  width: 100%; border-collapse: collapse;
-  margin-bottom: 16px; font-size: 10.5pt;
-}
-.doc-page table th, .doc-page table td {
-  border: 1px solid #d0d0d0; padding: 6px 10px;
-  text-align: center; vertical-align: middle;
-}
-.doc-page table th {
-  background: #F9FAFB; font-weight: 500;
-  color: var(--text-secondary); font-size: 10.5pt;
+  text-align: center; font-size: 15pt;
+  margin-bottom: 20px; font-weight: 600;
+  color: #000; letter-spacing: 1px;
 }
 
-/* Fillable field placeholder */
-.field-placeholder {
-  display: inline-block; min-width: 60px; min-height: 22px;
-  padding: 3px 10px;
-  background: #EFF6FF; border: 1.5px dashed #93C5FD;
-  border-radius: 3px; cursor: pointer;
-  color: #3B82F6; font-size: 10.5pt; font-family: inherit;
-  transition: all 0.15s; text-align: center;
+/* ── Field Sections ── */
+.field-section { margin-bottom: 18px; }
+.field-section-header {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 6px;
+  display: flex; align-items: center; gap: 6px;
 }
-.field-placeholder:hover {
-  background: #DBEAFE; border-color: #60A5FA;
+.field-section-header .count {
+  font-weight: 400; color: var(--text-muted); font-size: 10px;
 }
-.field-placeholder.filled {
-  background: #ECFDF5; border-color: #6EE7B7;
-  color: var(--text); border-style: solid;
+
+.field-table { width: 100%; border-collapse: collapse; }
+.field-table td { padding: 4px 6px; vertical-align: middle; }
+.field-table .f-label {
+  width: 90px; text-align: right;
+  font-size: 10.5pt; font-weight: 500;
+  color: var(--text); white-space: nowrap;
+  padding-right: 10px;
 }
+
+/* ── Editable Field Input ── */
+.field-edit {
+  border: 1.5px dashed #93C5FD;
+  background: #EFF6FF;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-size: 10.5pt;
+  font-family: inherit;
+  color: var(--text);
+  min-width: 80px;
+  width: 100%;
+  outline: none;
+  transition: all 0.15s;
+}
+.field-edit:focus {
+  border-color: var(--primary);
+  border-style: solid;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.08);
+}
+.field-edit.filled {
+  background: #ECFDF5;
+  border-color: #6EE7B7;
+  border-style: solid;
+}
+.field-edit::placeholder { color: #9CA3AF; font-size: 9pt; }
+
+/* Compact grid for grouped sub-fields */
+.sub-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 4px;
+}
+.sub-field-item {
+  display: flex; flex-direction: column; gap: 1px;
+}
+.sub-field-item .sub-label {
+  font-size: 8.5pt; color: var(--text-muted); padding-left: 2px;
+}
+
+/* ── Progress bar ── */
+.fill-progress {
+  margin-bottom: 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.fill-progress .bar-track {
+  flex: 1; height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden;
+}
+.fill-progress .bar-fill {
+  height: 100%; background: var(--success); border-radius: 3px; transition: width 0.3s;
+}
+.fill-progress .bar-text { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+
+/* ── Submit button ── */
+.submit-edits-btn {
+  display: block; width: 100%;
+  padding: 9px; margin-top: 16px;
+  background: var(--primary); color: #fff;
+  border: none; border-radius: var(--radius-sm);
+  font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: background 0.15s;
+  font-family: inherit;
+}
+.submit-edits-btn:hover { background: var(--primary-light); }
+.submit-edits-btn:disabled { background: #D1D5DB; cursor: not-allowed; }
 
 /* Generating spinner */
-.generating {
-  display: flex; flex-direction: column; align-items: center;
-  gap: 16px; margin-top: 100px;
-}
-.generating .spinner {
-  width: 36px; height: 36px;
-  border: 3px solid var(--border);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-}
+.generating { display: flex; flex-direction: column; align-items: center; gap: 16px; margin-top: 100px; }
+.generating .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-.generating p {
-  font-size: 13px; color: var(--text-secondary);
-}
+.generating p { font-size: 13px; color: var(--text-secondary); }
 
 /* Document Done Card */
 .doc-done-card {
-  background: var(--surface);
-  border-radius: var(--radius);
+  background: var(--surface); border-radius: var(--radius);
   box-shadow: var(--shadow-md);
-  width: 100%; max-width: 480px;
-  padding: 40px; text-align: center;
+  width: 100%; max-width: 480px; padding: 40px; text-align: center;
 }
 .doc-done-card .done-icon {
-  width: 48px; height: 48px;
-  border-radius: 50%;
+  width: 48px; height: 48px; border-radius: 50%;
   background: var(--success-bg);
   display: flex; align-items: center; justify-content: center;
   margin: 0 auto 14px;
 }
-.doc-done-card .done-icon svg {
-  width: 22px; height: 22px; color: var(--success);
-}
-.doc-done-card h4 {
-  font-size: 16px; font-weight: 600; margin-bottom: 6px;
-}
-.doc-done-card p {
-  color: var(--text-secondary); font-size: 12.5px;
-}
+.doc-done-card .done-icon svg { width: 22px; height: 22px; color: var(--success); }
+.doc-done-card h4 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.doc-done-card p { color: var(--text-secondary); font-size: 12.5px; }
 .doc-done-card .dl-btn {
   display: inline-flex; align-items: center; gap: 6px;
   margin-top: 18px; padding: 10px 24px;
   background: var(--primary); color: #fff;
   border-radius: var(--radius-sm); text-decoration: none;
-  font-size: 13px; font-weight: 500;
-  transition: background 0.15s;
+  font-size: 13px; font-weight: 500; transition: background 0.15s;
 }
-.doc-done-card .dl-btn:hover {
-  background: var(--primary-light);
-}
+.doc-done-card .dl-btn:hover { background: var(--primary-light); }
 .doc-done-card .checks {
   margin-top: 18px; text-align: left;
-  background: var(--success-bg);
-  border-radius: var(--radius-sm);
-  padding: 12px 16px; font-size: 12px;
-  color: var(--success); line-height: 2;
+  background: var(--success-bg); border-radius: var(--radius-sm);
+  padding: 12px 16px; font-size: 12px; color: var(--success); line-height: 2;
 }
 
 /* Template select table */
-.template-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 14px;
-}
-.template-table th {
-  background: #F9FAFB; color: var(--text-secondary);
-  font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.04em; padding: 8px 14px;
-}
-.template-table td {
-  padding: 12px;
-  border-bottom: 1px solid var(--border-light);
-  font-size: 13px;
-}
+.template-table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+.template-table th { background: #F9FAFB; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; padding: 8px 14px; }
+.template-table td { padding: 12px; border-bottom: 1px solid var(--border-light); font-size: 13px; }
 .template-table tr:last-child td { border-bottom: none; }
-.template-table .tpl-link {
-  color: var(--primary); cursor: pointer;
-  font-weight: 500;
-  transition: color 0.15s;
-}
-.template-table .tpl-link:hover {
-  color: var(--primary-light);
-}
+.template-table .tpl-link { color: var(--primary); cursor: pointer; font-weight: 500; transition: color 0.15s; }
+.template-table .tpl-link:hover { color: var(--primary-light); }
 
 /* Upload drop zone */
-.upload-drop-zone {
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 48px; text-align: center;
-  cursor: pointer; transition: all 0.2s;
-  width: 100%; max-width: 460px;
-}
-.upload-drop-zone:hover, .upload-drop-zone.dragover {
-  border-color: var(--primary);
-  background: var(--primary-lighter);
-}
-.upload-drop-zone .icon {
-  font-size: 36px; margin-bottom: 12px; opacity: 0.35;
-}
+.upload-drop-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 48px; text-align: center; cursor: pointer; transition: all 0.2s; width: 100%; max-width: 460px; }
+.upload-drop-zone:hover, .upload-drop-zone.dragover { border-color: var(--primary); background: var(--primary-lighter); }
+.upload-drop-zone .icon { font-size: 36px; margin-bottom: 12px; opacity: 0.35; }
 .upload-drop-zone p { font-size: 13px; color: var(--text-secondary); }
-.upload-drop-zone .hint {
-  font-size: 11px; color: var(--text-muted); margin-top: 6px;
-}
+.upload-drop-zone .hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 
-/* ── Responsive ── */
 @media (max-width: 900px) {
   .app { flex-direction: column; }
   .chat-panel { width: 100%; height: 55vh; min-width: auto; }
@@ -633,7 +511,6 @@ html, body {
 <body>
 
 <div class="app">
-  <!-- ── Left: Chat Panel ── -->
   <div class="chat-panel">
     <div class="chat-header">
       <div class="avatar">文</div>
@@ -687,7 +564,6 @@ html, body {
     </div>
   </div>
 
-  <!-- ── Right: Preview Panel ── -->
   <div class="preview-panel">
     <div class="preview-header">
       <div class="title-area">
@@ -723,6 +599,8 @@ let currentMode = '';
 let fieldData = {};
 let parsedFields = [];
 let pendingChoices = null;
+let previewRendered = false;  // 是否已渲染过字段预览
+let lastFieldListKey = '';     // 用于检测字段列表是否变化
 
 // ── API ──
 function detectBaseUrl() {
@@ -750,7 +628,6 @@ if (!BASE_URL || !API_URL) {
   });
 }
 
-// ── Auto-resize textarea ──
 function autoResize(ta) {
   ta.style.height = 'auto';
   ta.style.height = Math.min(ta.scrollHeight, 100) + 'px';
@@ -762,7 +639,6 @@ async function sendMessage(text) {
   const input = document.getElementById('userInput');
   const msg = text || input.value.trim();
   if (!msg || isStreaming) return;
-
   if (!text) { input.value = ''; input.style.height = 'auto'; }
   appendMessage('user', msg);
   await callAgent(msg);
@@ -786,7 +662,6 @@ function appendMessage(role, content, extra) {
   return div;
 }
 
-// ── Create Streaming Bubble ──
 function createStreamingMessage() {
   const container = document.getElementById('chatMessages');
   const div = document.createElement('div');
@@ -823,6 +698,7 @@ async function callAgent(userText) {
     const decoder = new TextDecoder();
     let fullText = '';
     let buffer = '';
+    let lastFieldCheckLen = 0;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -839,16 +715,24 @@ async function callAgent(userText) {
         try {
           const json = JSON.parse(data);
           const delta = json.choices?.[0]?.delta;
-          // 跳过工具执行结果（role=tool），只显示助手回复
           if (delta?.content && delta.role !== 'tool') {
             fullText += delta.content;
             bubble.innerHTML = renderMarkdown(fullText);
             document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+
+            // 实时检测字段值并更新预览（每累积50字符检测一次，避免过于频繁）
+            if (fullText.length - lastFieldCheckLen > 50) {
+              lastFieldCheckLen = fullText.length;
+              detectFieldValues(fullText);
+              refreshFieldInputs();
+            }
           }
         } catch (e) {}
       }
     }
 
+    // 流结束后最终检测
+    detectFieldValues(fullText);
     postProcessResponse(fullText);
 
   } catch (err) {
@@ -857,6 +741,27 @@ async function callAgent(userText) {
     isStreaming = false;
     document.getElementById('sendBtn').disabled = false;
     document.getElementById('userInput').focus();
+  }
+}
+
+// ── Detect field values from text ──
+function detectFieldValues(text) {
+  // 检测 "字段：值" 格式
+  const kvMatches = text.matchAll(/[-–·]\s*(.+?)[：:]\s*(.+)/g);
+  for (const m of kvMatches) {
+    const key = m[1].trim().replace(/\*+/g, '');
+    const val = m[2].trim();
+    if (key && val && key.length < 20 && val.length < 200) {
+      fieldData[key] = val;
+    }
+  }
+  // 检测 "请填写/请提供/请输入" 后的字段名
+  const fieldMatches = text.matchAll(/(?:请填写|请提供|请输入)[：:]?\s*[-–]?\s*(?:【)?([^\n,，。】【]+?)(?:】)?/g);
+  for (const m of fieldMatches) {
+    if (m[1] && m[1].trim().length < 20) {
+      const label = m[1].trim();
+      if (!parsedFields.includes(label)) parsedFields.push(label);
+    }
   }
 }
 
@@ -880,7 +785,6 @@ function postProcessResponse(text) {
     if (tplMatch) currentTemplate = tplMatch[1];
   }
 
-  // 上传模板模式：识别到字段后进入收集阶段
   if (text.includes('识别到') && text.includes('字段') && currentStep === 0) {
     currentStep = 1; updateStepBar();
     const tplFileMatch = text.match(/模板[：:]?\s*(\S+\.docx?)/);
@@ -889,21 +793,7 @@ function postProcessResponse(text) {
 
   if (text.includes('请填写') || text.includes('请提供') || text.includes('请输入')) {
     if (currentStep < 2) currentStep = 2;
-    const fieldMatches = text.matchAll(/(?:请填写|请提供|请输入)[：:]?\s*[-–]?\s*(?:【)?([^\n,，。】【]+?)(?:】)?/g);
-    for (const m of fieldMatches) {
-      if (m[1] && m[1].trim().length < 20) {
-        const label = m[1].trim();
-        if (!parsedFields.includes(label)) parsedFields.push(label);
-      }
-    }
     updatePreview('collecting');
-  }
-
-  const kvMatches = text.matchAll(/[-–]\s*(.+?)[：:]\s*(.+)/g);
-  for (const m of kvMatches) {
-    const key = m[1].trim();
-    const val = m[2].trim();
-    if (key && val && key.length < 20) fieldData[key] = val;
   }
 
   if (text.includes('核对') || text.includes('确认')) {
@@ -920,6 +810,7 @@ function postProcessResponse(text) {
   }
 
   updateStepBar();
+  refreshFieldInputs();
 }
 
 function updateStepBar() {
@@ -930,6 +821,274 @@ function updateStepBar() {
     if (i < currentStep) el.classList.add('done');
     else if (i === currentStep) el.classList.add('active');
   });
+}
+
+// ── Group fields by prefix ──
+function groupFieldsByPrefix(fields) {
+  const basic = [];
+  const groups = {};
+
+  for (const f of fields) {
+    if (f.includes('_')) {
+      const prefix = f.split('_')[0];
+      if (!groups[prefix]) groups[prefix] = [];
+      groups[prefix].push(f);
+    } else {
+      basic.push(f);
+    }
+  }
+  return { basic, groups };
+}
+
+// ── Count filled fields ──
+function countFilled() {
+  let filled = 0;
+  for (const f of parsedFields) {
+    if (fieldData[f] && fieldData[f].trim()) filled++;
+  }
+  return { filled, total: parsedFields.length };
+}
+
+// ── Render dynamic doc preview with editable fields ──
+function renderDocPreview() {
+  const body = document.getElementById('previewBody');
+  const { basic, groups } = groupFieldsByPrefix(parsedFields);
+  const { filled, total } = countFilled();
+  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+
+  let html = `<div class="doc-page">`;
+  html += `<h2>${currentTemplate || '教务文档'}</h2>`;
+
+  // Progress bar
+  if (total > 0) {
+    html += `<div class="fill-progress">
+      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+      <span class="bar-text">${filled}/${total} 已填写</span>
+    </div>`;
+  }
+
+  // Basic fields
+  if (basic.length > 0) {
+    html += `<div class="field-section">`;
+    html += `<div class="field-section-header">基本信息 <span class="count">${basic.length}项</span></div>`;
+    html += `<table class="field-table">`;
+    for (const f of basic) {
+      const val = fieldData[f] || '';
+      html += `<tr>
+        <td class="f-label">${escapeHtml(f)}</td>
+        <td><input class="field-edit ${val ? 'filled' : ''}" data-field="${escapeAttr(f)}" value="${escapeAttr(val)}" placeholder="点击填写..."></td>
+      </tr>`;
+    }
+    html += `</table></div>`;
+  }
+
+  // Grouped fields
+  const sortedGroups = Object.entries(groups).sort((a, b) => {
+    const numA = a[0].match(/\d+/);
+    const numB = b[0].match(/\d+/);
+    if (numA && numB) return parseInt(numA[0]) - parseInt(numB[0]);
+    return a[0].localeCompare(b[0]);
+  });
+
+  for (const [prefix, fields] of sortedGroups) {
+    html += `<div class="field-section">`;
+    html += `<div class="field-section-header">${escapeHtml(prefix)} <span class="count">${fields.length}项</span></div>`;
+
+    // 判断子字段是否简短（适合网格布局）
+    const subLabels = fields.map(f => f.includes('_') ? f.substring(f.indexOf('_') + 1) : f);
+    const isShort = subLabels.every(l => l.length <= 6);
+
+    if (isShort && fields.length > 4) {
+      // 网格布局
+      html += `<div class="sub-field-grid">`;
+      for (const f of fields) {
+        const val = fieldData[f] || '';
+        const shortLabel = f.includes('_') ? f.substring(f.indexOf('_') + 1) : f;
+        html += `<div class="sub-field-item">
+          <span class="sub-label">${escapeHtml(shortLabel)}</span>
+          <input class="field-edit ${val ? 'filled' : ''}" data-field="${escapeAttr(f)}" value="${escapeAttr(val)}" placeholder="-">
+        </div>`;
+      }
+      html += `</div>`;
+    } else {
+      // 表格布局
+      html += `<table class="field-table">`;
+      for (const f of fields) {
+        const val = fieldData[f] || '';
+        const shortLabel = f.includes('_') ? f.substring(f.indexOf('_') + 1) : f;
+        html += `<tr>
+          <td class="f-label">${escapeHtml(shortLabel)}</td>
+          <td><input class="field-edit ${val ? 'filled' : ''}" data-field="${escapeAttr(f)}" value="${escapeAttr(val)}" placeholder="点击填写..."></td>
+        </tr>`;
+      }
+      html += `</table>`;
+    }
+    html += `</div>`;
+  }
+
+  // Submit button
+  html += `<button class="submit-edits-btn" id="submitEditsBtn" onclick="submitManualEdits()" ${isStreaming ? 'disabled' : ''}>提交手动填写</button>`;
+  html += `</div>`;
+
+  body.innerHTML = html;
+  previewRendered = true;
+  lastFieldListKey = parsedFields.join(',');
+}
+
+// ── Refresh only input values (without full re-render) ──
+function refreshFieldInputs() {
+  if (!previewRendered) {
+    // 首次渲染或有新字段时完整渲染
+    const newKey = parsedFields.join(',');
+    if (newKey !== lastFieldListKey) {
+      renderDocPreview();
+      return;
+    }
+  }
+
+  // 只更新已有 input 的值和样式
+  const inputs = document.querySelectorAll('.field-edit[data-field]');
+  inputs.forEach(input => {
+    const f = input.dataset.field;
+    const val = fieldData[f] || '';
+    if (document.activeElement !== input) {
+      input.value = val;
+    }
+    input.classList.toggle('filled', !!val.trim());
+  });
+
+  // 更新进度条
+  const { filled, total } = countFilled();
+  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+  const barFill = document.querySelector('.bar-fill');
+  const barText = document.querySelector('.bar-text');
+  if (barFill) barFill.style.width = pct + '%';
+  if (barText) barText.textContent = `${filled}/${total} 已填写`;
+}
+
+// ── Handle user editing a field ──
+function onFieldEdit(fieldName, value) {
+  fieldData[fieldName] = value;
+  const input = document.querySelector(`input[data-field="${fieldName}"]`);
+  if (input) input.classList.toggle('filled', !!value.trim());
+  // 更新进度条
+  const { filled, total } = countFilled();
+  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+  const barFill = document.querySelector('.bar-fill');
+  const barText = document.querySelector('.bar-text');
+  if (barFill) barFill.style.width = pct + '%';
+  if (barText) barText.textContent = `${filled}/${total} 已填写`;
+}
+
+// ── Submit manually edited fields to agent ──
+async function submitManualEdits() {
+  // 收集所有手动填写的字段
+  const edits = {};
+  const inputs = document.querySelectorAll('.field-edit[data-field]');
+  inputs.forEach(input => {
+    const f = input.dataset.field;
+    const val = input.value.trim();
+    if (val) {
+      fieldData[f] = val;
+      edits[f] = val;
+    }
+  });
+
+  const editCount = Object.keys(edits).length;
+  if (editCount === 0) {
+    alert('没有填写任何字段');
+    return;
+  }
+
+  // 构造发给agent的消息
+  let msg = '我手动填写了以下字段信息：\n';
+  for (const [k, v] of Object.entries(edits)) {
+    msg += `- ${k}：${v}\n`;
+  }
+  msg += '\n请记录这些信息，继续下一步。';
+
+  appendMessage('user', `提交了 ${editCount} 个字段的手动填写`);
+  await callAgent(msg);
+}
+
+// ── Event delegation for field edits ──
+document.addEventListener('input', function(e) {
+  if (e.target.classList.contains('field-edit') && e.target.dataset.field) {
+    onFieldEdit(e.target.dataset.field, e.target.value);
+  }
+});
+document.addEventListener('change', function(e) {
+  if (e.target.classList.contains('field-edit') && e.target.dataset.field) {
+    onFieldEdit(e.target.dataset.field, e.target.value);
+  }
+});
+
+// ── Update Preview ──
+function updatePreview(state) {
+  const body = document.getElementById('previewBody');
+  const title = document.getElementById('previewTitle');
+
+  switch(state) {
+    case 'template-select':
+      title.textContent = '选择模板';
+      body.innerHTML = `
+        <div class="doc-page" style="max-width:520px;padding:36px;">
+          <h2>可选教务文档模板</h2>
+          <table class="template-table">
+            <tr><th style="width:50px;"></th><th>模板名称</th><th style="width:200px;">说明</th></tr>
+            <tr><td style="color:var(--text-muted);">1</td><td><span class="tpl-link" onclick="sendMessage('1')">评价报告</span></td><td style="color:var(--text-secondary);">专业课程目标达成度评价报告</td></tr>
+            <tr><td style="color:var(--text-muted);">2</td><td><span class="tpl-link" onclick="sendMessage('2')">试卷分析</span></td><td style="color:var(--text-secondary);">试卷分析表（考勤+分数分布）</td></tr>
+            <tr><td style="color:var(--text-muted);">3</td><td><span class="tpl-link" onclick="sendMessage('3')">关联矩阵</span></td><td style="color:var(--text-secondary);">考题与课程目标关联矩阵</td></tr>
+          </table>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">点击模板名称或回复编号选择</p>
+        </div>`;
+      break;
+
+    case 'collecting':
+      title.textContent = `信息收集${currentTemplate ? ' · ' + currentTemplate : ''}`;
+      // 如果有字段但预览还没渲染，渲染之
+      if (parsedFields.length > 0) {
+        const newKey = parsedFields.join(',');
+        if (newKey !== lastFieldListKey) {
+          renderDocPreview();
+        } else {
+          refreshFieldInputs();
+        }
+      }
+      break;
+
+    case 'confirm':
+      title.textContent = '核对确认';
+      if (parsedFields.length > 0) {
+        refreshFieldInputs();
+      }
+      break;
+
+    case 'generating':
+      title.textContent = '生成中...';
+      body.innerHTML = `<div class="generating"><div class="spinner"></div><p>正在生成文档...</p></div>`;
+      break;
+
+    case 'done':
+      title.textContent = '文档已生成';
+      body.innerHTML = `
+        <div class="doc-done-card">
+          <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
+          <h4>文档生成完成</h4>
+          <p>格式与模板一致</p>
+          <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">下载 Word 文档</a>
+          <div class="checks">
+            · 文档格式与模板一致<br>
+            · 所有字段已填入<br>
+            · 链接 24 小时内有效
+          </div>
+        </div>`;
+      break;
+
+    default:
+      title.textContent = '文档预览';
+      body.innerHTML = `<div class="empty-state"><div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div><h4>文档预览区</h4><p>选择模板并填写信息后，生成的文档将在此展示。</p></div>`;
+  }
 }
 
 // ── Function 1: Built-in Templates ──
@@ -948,7 +1107,6 @@ async function startAutoFill() {
   }
 }
 
-// ── Function: Upload Template ──
 function triggerTemplateUpload() {
   document.getElementById('templateFileInput').click();
 }
@@ -991,7 +1149,6 @@ async function handleTemplateUpload(event) {
 function startSelectFill() {}
 function startCoFill() {}
 
-// ── Function 4: File Upload ──
 function triggerUpload() {
   document.getElementById('fileInput').click();
 }
@@ -1030,122 +1187,6 @@ function highlightUploadBtn() {
   setTimeout(() => btn.style.animation = '', 3000);
 }
 
-// ── Update Preview ──
-function updatePreview(state) {
-  const body = document.getElementById('previewBody');
-  const title = document.getElementById('previewTitle');
-
-  switch(state) {
-    case 'template-select':
-      title.textContent = '选择模板';
-      body.innerHTML = `
-        <div class="doc-page" style="max-width:520px;padding:36px;">
-          <h2>可选教务文档模板</h2>
-          <table class="template-table">
-            <tr><th style="width:50px;"></th><th>模板名称</th><th style="width:200px;">说明</th></tr>
-            <tr><td style="color:var(--text-muted);">1</td><td><span class="tpl-link" onclick="sendMessage('1')">评价报告</span></td><td style="color:var(--text-secondary);">专业课程目标达成度评价报告</td></tr>
-            <tr><td style="color:var(--text-muted);">2</td><td><span class="tpl-link" onclick="sendMessage('2')">试卷分析</span></td><td style="color:var(--text-secondary);">试卷分析表（考勤+分数分布）</td></tr>
-            <tr><td style="color:var(--text-muted);">3</td><td><span class="tpl-link" onclick="sendMessage('3')">关联矩阵</span></td><td style="color:var(--text-secondary);">考题与课程目标关联矩阵</td></tr>
-          </table>
-          <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">点击模板名称或回复编号选择</p>
-        </div>`;
-      break;
-
-    case 'collecting':
-      title.textContent = `信息收集${currentTemplate ? ' · ' + currentTemplate : ''}`;
-      renderDocPreview();
-      break;
-
-    case 'confirm':
-      title.textContent = '核对确认';
-      renderDocPreview();
-      break;
-
-    case 'generating':
-      title.textContent = '生成中...';
-      body.innerHTML = `<div class="generating"><div class="spinner"></div><p>正在生成文档...</p></div>`;
-      break;
-
-    case 'done':
-      title.textContent = '文档已生成';
-      body.innerHTML = `
-        <div class="doc-done-card">
-          <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
-          <h4>文档生成完成</h4>
-          <p>格式与模板一致</p>
-          <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">下载 Word 文档</a>
-          <div class="checks">
-            · 文档格式与模板一致<br>
-            · 所有字段已填入<br>
-            · 链接 24 小时内有效
-          </div>
-        </div>`;
-      break;
-
-    default:
-      title.textContent = '文档预览';
-      body.innerHTML = `<div class="empty-state"><div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div><h4>文档预览区</h4><p>选择模板并填写信息后，生成的文档将在此展示。</p></div>`;
-  }
-}
-
-// ── Render Doc Preview ──
-function renderDocPreview() {
-  const body = document.getElementById('previewBody');
-  const basicFields = ['课程名称','课程代码','开课学期','授课教师','学分','学时','课程性质'];
-
-  let basicHtml = '';
-  for (const f of basicFields) {
-    const val = fieldData[f] || '';
-    const cls = val ? 'filled' : '';
-    const display = val || '待填写';
-    basicHtml += `<tr><td style="width:90px;text-align:right;font-weight:500;">${f}</td>
-      <td><span class="field-placeholder ${cls}">${display}</span></td></tr>`;
-  }
-
-  let goalRows = '';
-  for (let i = 1; i <= 12; i++) {
-    const approach = fieldData[`实现途径${i}`] || fieldData['实现途径'] || '';
-    const method = fieldData[`评价方法${i}`] || fieldData['评价方法'] || '';
-    if (i <= 4 || approach || method) {
-      const aCls = approach ? 'filled' : '';
-      const mCls = method ? 'filled' : '';
-      goalRows += `<tr>
-        <td style="width:50px;">目标${i}</td>
-        <td><span class="field-placeholder ${aCls}">${approach || '待填写'}</span></td>
-        <td><span class="field-placeholder ${mCls}">${method || '待填写'}</span></td>
-      </tr>`;
-    }
-  }
-  if (!goalRows) {
-    goalRows = `<tr><td colspan="3" style="color:var(--text-secondary);">课程目标信息收集后显示</td></tr>`;
-  }
-
-  const summary = fieldData['课程总结'] || '';
-  const improve = fieldData['改进措施'] || '';
-
-  body.innerHTML = `
-    <div class="doc-page">
-      <h2>${currentTemplate || '教务文档'}</h2>
-      <table>
-        <tr><th colspan="2" style="background:#F9FAFB;font-weight:600;color:var(--text);">基本信息</th></tr>
-        ${basicHtml}
-      </table>
-      <table>
-        <tr><th style="width:50px;">序号</th><th>实现途径</th><th>评价方法</th></tr>
-        ${goalRows}
-      </table>
-      <table>
-        <tr><td style="width:90px;text-align:right;font-weight:500;">课程总结</td>
-          <td><span class="field-placeholder ${summary?'filled':''}">${summary || '待填写'}</span></td></tr>
-        <tr><td style="text-align:right;font-weight:500;">改进措施</td>
-          <td><span class="field-placeholder ${improve?'filled':''}">${improve || '待填写'}</span></td></tr>
-      </table>
-      <p style="font-size:10px;color:var(--text-muted);margin-top:16px;text-align:center;">
-        HTML 预览 · 生成 Word 文档格式与模板一致
-      </p>
-    </div>`;
-}
-
 function downloadDoc() {
   if (currentDownloadUrl) window.open(currentDownloadUrl);
 }
@@ -1153,10 +1194,8 @@ function downloadDoc() {
 // ── Markdown Render ──
 function renderMarkdown(text) {
   let html = escapeHtml(text);
-  // 1. 先处理 markdown 链接 [文字](url.docx) → 单个下载按钮
   html = html.replace(/\[([^\]]*)\]\((https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)\)/g,
     '<a class="download-link" href="$2" target="_blank">下载文档</a>');
-  // 2. 再处理裸 URL（避免重复匹配已被上面替换的链接）
   html = html.replace(/(?<!href=")(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
     '<a class="download-link" href="$1" target="_blank">下载文档</a>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -1166,10 +1205,15 @@ function renderMarkdown(text) {
   return html;
 }
 
+// ── Helpers ──
 function escapeHtml(text) {
   const d = document.createElement('div');
   d.textContent = text;
   return d.innerHTML;
+}
+
+function escapeAttr(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ── Init ──
@@ -1190,7 +1234,6 @@ window.addEventListener('load', () => {
   updateStepBar();
 });
 
-// Pulse animation for upload btn highlight
 const style = document.createElement('style');
 style.textContent = '@keyframes pulse { 0%,100%{transform:scale(1);box-shadow:var(--shadow)} 50%{transform:scale(1.03);box-shadow:0 0 0 4px rgba(37,99,235,0.1)} }';
 document.head.appendChild(style);
