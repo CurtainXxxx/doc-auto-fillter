@@ -839,7 +839,8 @@ async function callAgent(userText) {
         try {
           const json = JSON.parse(data);
           const delta = json.choices?.[0]?.delta;
-          if (delta?.content) {
+          // 跳过工具执行结果（role=tool），只显示助手回复
+          if (delta?.content && delta.role !== 'tool') {
             fullText += delta.content;
             bubble.innerHTML = renderMarkdown(fullText);
             document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
