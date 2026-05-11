@@ -710,7 +710,11 @@ html, body {
 
 <script>
 // ── State ──
-let sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
+let sessionId = localStorage.getItem('doc_session_id');
+if (!sessionId) {
+  sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2,6);
+  localStorage.setItem('doc_session_id', sessionId);
+}
 let isStreaming = false;
 let currentDownloadUrl = '';
 let currentTemplate = '';
@@ -1165,13 +1169,19 @@ function escapeHtml(text) {
 
 // ── Init ──
 window.addEventListener('load', () => {
-  appendMessage('assistant',
-    '您好，请选择操作方式：\n\n' +
-    '· 点击下方「内置模板」选择预设模板\n' +
-    '· 点击「上传模板」上传Word文档自动识别\n' +
-    '· 点击「知识文件上传」提取文件信息\n' +
-    '· 或直接输入消息开始'
-  );
+  const isNewSession = !localStorage.getItem('doc_session_id_visited');
+  if (isNewSession) {
+    localStorage.setItem('doc_session_id_visited', '1');
+    appendMessage('assistant',
+      '您好，请选择操作方式：\n\n' +
+      '· 点击下方「内置模板」选择预设模板\n' +
+      '· 点击「上传模板」上传Word文档自动识别\n' +
+      '· 点击「知识文件上传」提取文件信息\n' +
+      '· 或直接输入消息开始'
+    );
+  } else {
+    appendMessage('assistant', '已恢复上次对话，您可以继续操作。');
+  }
   updateStepBar();
 });
 
