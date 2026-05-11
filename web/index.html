@@ -290,7 +290,7 @@ html, body {
 .chat-input .send-btn:active { opacity: 0.85; }
 .chat-input .send-btn:disabled { background: #D1D5DB; cursor: not-allowed; }
 
-/* ── Right Panel: Preview ── */
+/* ── Right Panel: Document Preview ── */
 .preview-panel {
   flex: 1;
   display: flex; flex-direction: column;
@@ -342,7 +342,7 @@ html, body {
 .empty-state h4 { font-size: 15px; color: var(--text); margin-bottom: 6px; font-weight: 600; }
 .empty-state p { font-size: 12.5px; line-height: 1.7; color: var(--text-secondary); }
 
-/* ── Document Preview ── */
+/* ── Document Page (like a Word page) ── */
 .doc-page {
   background: var(--surface);
   box-shadow: var(--shadow-md);
@@ -350,78 +350,105 @@ html, body {
   width: 100%; max-width: 860px;
   min-height: 540px;
   padding: 36px 44px;
-  font-size: 12pt;
+  font-size: 10.5pt;
   line-height: 1.8;
   color: #1a1a1a;
 }
 .doc-page h2 {
-  text-align: center; font-size: 15pt;
+  text-align: center; font-size: 14pt;
   margin-bottom: 20px; font-weight: 600;
   color: #000; letter-spacing: 1px;
 }
-
-/* ── Field Sections ── */
-.field-section { margin-bottom: 18px; }
-.field-section-header {
-  font-size: 11px; font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.04em;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border-light);
+.doc-page p {
   margin-bottom: 6px;
-  display: flex; align-items: center; gap: 6px;
-}
-.field-section-header .count {
-  font-weight: 400; color: var(--text-muted); font-size: 10px;
 }
 
-.field-table { width: 100%; border-collapse: collapse; }
-.field-table td { padding: 4px 6px; vertical-align: middle; }
-.field-table .f-label {
-  width: 90px; text-align: right;
-  font-size: 10.5pt; font-weight: 500;
-  color: var(--text); white-space: nowrap;
-  padding-right: 10px;
-}
-
-/* ── Editable Field Input ── */
-.field-edit {
-  border: 1.5px dashed #93C5FD;
-  background: #EFF6FF;
-  border-radius: 3px;
-  padding: 3px 8px;
-  font-size: 10.5pt;
-  font-family: inherit;
-  color: var(--text);
-  min-width: 80px;
+/* ── Document Table (mimic Word table) ── */
+.doc-table {
   width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+  font-size: 9pt;
+  line-height: 1.6;
+}
+.doc-table td {
+  border: 1px solid #333;
+  padding: 3px 6px;
+  vertical-align: middle;
+  word-break: break-all;
+}
+.doc-table td.label {
+  background: #f8f8f8;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* ── Editable cells in document ── */
+.doc-cell.editable {
+  position: relative;
+  min-width: 30px;
+  min-height: 20px;
+}
+.doc-cell.editable.empty {
+  background: #FEFCE8;
+}
+.doc-cell.editable.empty::before {
+  content: attr(data-placeholder);
+  color: #C4B5A0;
+  font-size: 8.5pt;
+  pointer-events: none;
+  opacity: 0.7;
+}
+.doc-cell.editable.filled {
+  background: #ECFDF5;
+}
+.doc-cell.editable:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+  background: #fff;
+}
+
+/* ── Colon field: label + editable value ── */
+.doc-cell.colon-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+.doc-cell.colon-field .cell-label {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.doc-cell.colon-field .cell-value {
+  flex: 1;
+  min-width: 30px;
   outline: none;
+  border-bottom: 1.5px dashed #C4B5A0;
+  padding: 0 4px;
   transition: all 0.15s;
 }
-.field-edit:focus {
-  border-color: var(--primary);
-  border-style: solid;
+.doc-cell.colon-field .cell-value:focus {
+  border-bottom-color: var(--primary);
+  border-bottom-style: solid;
   background: #fff;
-  box-shadow: 0 0 0 2px rgba(37,99,235,0.08);
 }
-.field-edit.filled {
+.doc-cell.colon-field .cell-value.filled {
+  border-bottom-color: var(--success);
+  border-bottom-style: solid;
   background: #ECFDF5;
-  border-color: #6EE7B7;
-  border-style: solid;
+  border-radius: 2px;
 }
-.field-edit::placeholder { color: #9CA3AF; font-size: 9pt; }
 
-/* Compact grid for grouped sub-fields */
-.sub-field-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-  gap: 4px;
+/* Multi-line colon fields */
+.doc-cell.colon-field.multi-line {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
 }
-.sub-field-item {
-  display: flex; flex-direction: column; gap: 1px;
-}
-.sub-field-item .sub-label {
-  font-size: 8.5pt; color: var(--text-muted); padding-left: 2px;
+.doc-cell.colon-field.multi-line .colon-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 /* ── Progress bar ── */
@@ -578,7 +605,7 @@ html, body {
       <div class="empty-state">
         <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div>
         <h4>文档预览区</h4>
-        <p>选择模板并填写信息后，生成的文档将在此展示。</p>
+        <p>选择模板后，原始文档将在此显示，您可以在此直接填写信息。</p>
       </div>
     </div>
   </div>
@@ -594,13 +621,15 @@ if (!sessionId) {
 let isStreaming = false;
 let currentDownloadUrl = '';
 let currentTemplate = '';
+let currentTemplatePath = '';  // 当前模板文件路径（用于获取预览）
 let currentStep = 0;
 let currentMode = '';
-let fieldData = {};
-let parsedFields = [];
-let pendingChoices = null;
-let previewRendered = false;  // 是否已渲染过字段预览
-let lastFieldListKey = '';     // 用于检测字段列表是否变化
+let fieldData = {};            // field_id → value
+let labelToFields = {};        // label → [field_id, ...]  (从后端获取)
+let fieldMap = {};             // field_id → {label, table_idx, ...} (从后端获取)
+let docPreviewHtml = '';       // 后端返回的文档HTML
+let previewRendered = false;
+let manuallyEditedFields = {}; // 用户手动编辑过的字段
 
 // ── API ──
 function detectBaseUrl() {
@@ -720,11 +749,10 @@ async function callAgent(userText) {
             bubble.innerHTML = renderMarkdown(fullText);
             document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
 
-            // 实时检测字段值并更新预览（每累积50字符检测一次，避免过于频繁）
+            // 实时检测字段值并更新预览
             if (fullText.length - lastFieldCheckLen > 50) {
               lastFieldCheckLen = fullText.length;
-              detectFieldValues(fullText);
-              refreshFieldInputs();
+              detectAndUpdateFields(fullText);
             }
           }
         } catch (e) {}
@@ -732,7 +760,7 @@ async function callAgent(userText) {
     }
 
     // 流结束后最终检测
-    detectFieldValues(fullText);
+    detectAndUpdateFields(fullText);
     postProcessResponse(fullText);
 
   } catch (err) {
@@ -744,23 +772,48 @@ async function callAgent(userText) {
   }
 }
 
-// ── Detect field values from text ──
-function detectFieldValues(text) {
-  // 检测 "字段：值" 格式
+// ── Detect field values from agent text & update document preview ──
+function detectAndUpdateFields(text) {
+  // 检测 "字段：值" 或 "字段:值" 格式
   const kvMatches = text.matchAll(/[-–·]\s*(.+?)[：:]\s*(.+)/g);
   for (const m of kvMatches) {
     const key = m[1].trim().replace(/\*+/g, '');
     const val = m[2].trim();
     if (key && val && key.length < 20 && val.length < 200) {
-      fieldData[key] = val;
+      updateFieldByLabel(key, val);
     }
   }
-  // 检测 "请填写/请提供/请输入" 后的字段名
-  const fieldMatches = text.matchAll(/(?:请填写|请提供|请输入)[：:]?\s*[-–]?\s*(?:【)?([^\n,，。】【]+?)(?:】)?/g);
-  for (const m of fieldMatches) {
-    if (m[1] && m[1].trim().length < 20) {
-      const label = m[1].trim();
-      if (!parsedFields.includes(label)) parsedFields.push(label);
+}
+
+// ── Update a field in the document preview by label name ──
+function updateFieldByLabel(label, value) {
+  // 查找 label 对应的 field_ids
+  const fids = labelToFields[label];
+  if (!fids || fids.length === 0) return;
+
+  for (const fid of fids) {
+    fieldData[fid] = value;
+    updateCellInPreview(fid, value);
+  }
+}
+
+// ── Update a cell in the document preview by field_id ──
+function updateCellInPreview(fieldId, value) {
+  // 查找带 data-field-id 的元素
+  const els = document.querySelectorAll(`[data-field-id="${CSS.escape(fieldId)}"]`);
+  for (const el of els) {
+    // 如果用户正在编辑这个元素，跳过
+    if (document.activeElement === el) continue;
+
+    if (el.classList.contains('cell-value')) {
+      // 冒号字段的可编辑 span
+      el.textContent = value;
+      el.classList.toggle('filled', !!value.trim());
+    } else if (el.classList.contains('editable')) {
+      // 整格可编辑的 td
+      el.textContent = value;
+      el.classList.remove('empty');
+      el.classList.toggle('filled', !!value.trim());
     }
   }
 }
@@ -810,7 +863,6 @@ function postProcessResponse(text) {
   }
 
   updateStepBar();
-  refreshFieldInputs();
 }
 
 function updateStepBar() {
@@ -823,108 +875,50 @@ function updateStepBar() {
   });
 }
 
-// ── Group fields by prefix ──
-function groupFieldsByPrefix(fields) {
-  const basic = [];
-  const groups = {};
-
-  for (const f of fields) {
-    if (f.includes('_')) {
-      const prefix = f.split('_')[0];
-      if (!groups[prefix]) groups[prefix] = [];
-      groups[prefix].push(f);
-    } else {
-      basic.push(f);
+// ── Fetch document preview from backend ──
+async function fetchDocPreview(templatePath) {
+  if (!BASE_URL) return;
+  try {
+    const url = `${BASE_URL}/template-preview?path=${encodeURIComponent(templatePath)}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const result = await resp.json();
+    if (result.success) {
+      docPreviewHtml = result.html;
+      fieldMap = result.field_map || {};
+      labelToFields = result.label_to_fields || {};
+      renderDocPreview();
     }
+  } catch (e) {
+    console.warn('fetchDocPreview failed:', e);
   }
-  return { basic, groups };
 }
 
-// ── Count filled fields ──
-function countFilled() {
-  let filled = 0;
-  for (const f of parsedFields) {
-    if (fieldData[f] && fieldData[f].trim()) filled++;
-  }
-  return { filled, total: parsedFields.length };
-}
-
-// ── Render dynamic doc preview with editable fields ──
+// ── Render document preview ──
 function renderDocPreview() {
   const body = document.getElementById('previewBody');
-  const { basic, groups } = groupFieldsByPrefix(parsedFields);
-  const { filled, total } = countFilled();
-  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+  if (!docPreviewHtml) return;
+
+  // 计算填写进度
+  const totalFields = Object.keys(fieldMap).length;
+  let filledCount = 0;
+  for (const fid in fieldMap) {
+    if (fieldData[fid] && fieldData[fid].trim()) filledCount++;
+  }
+  const pct = totalFields > 0 ? Math.round(filledCount / totalFields * 100) : 0;
 
   let html = `<div class="doc-page">`;
-  html += `<h2>${currentTemplate || '教务文档'}</h2>`;
 
   // Progress bar
-  if (total > 0) {
+  if (totalFields > 0) {
     html += `<div class="fill-progress">
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-      <span class="bar-text">${filled}/${total} 已填写</span>
+      <span class="bar-text">${filledCount}/${totalFields} 已填写</span>
     </div>`;
   }
 
-  // Basic fields
-  if (basic.length > 0) {
-    html += `<div class="field-section">`;
-    html += `<div class="field-section-header">基本信息 <span class="count">${basic.length}项</span></div>`;
-    html += `<table class="field-table">`;
-    for (const f of basic) {
-      const val = fieldData[f] || '';
-      html += `<tr>
-        <td class="f-label">${escapeHtml(f)}</td>
-        <td><input class="field-edit ${val ? 'filled' : ''}" data-field="${escapeAttr(f)}" value="${escapeAttr(val)}" placeholder="点击填写..."></td>
-      </tr>`;
-    }
-    html += `</table></div>`;
-  }
-
-  // Grouped fields
-  const sortedGroups = Object.entries(groups).sort((a, b) => {
-    const numA = a[0].match(/\d+/);
-    const numB = b[0].match(/\d+/);
-    if (numA && numB) return parseInt(numA[0]) - parseInt(numB[0]);
-    return a[0].localeCompare(b[0]);
-  });
-
-  for (const [prefix, fields] of sortedGroups) {
-    html += `<div class="field-section">`;
-    html += `<div class="field-section-header">${escapeHtml(prefix)} <span class="count">${fields.length}项</span></div>`;
-
-    // 判断子字段是否简短（适合网格布局）
-    const subLabels = fields.map(f => f.includes('_') ? f.substring(f.indexOf('_') + 1) : f);
-    const isShort = subLabels.every(l => l.length <= 6);
-
-    if (isShort && fields.length > 4) {
-      // 网格布局
-      html += `<div class="sub-field-grid">`;
-      for (const f of fields) {
-        const val = fieldData[f] || '';
-        const shortLabel = f.includes('_') ? f.substring(f.indexOf('_') + 1) : f;
-        html += `<div class="sub-field-item">
-          <span class="sub-label">${escapeHtml(shortLabel)}</span>
-          <input class="field-edit ${val ? 'filled' : ''}" data-field="${escapeAttr(f)}" value="${escapeAttr(val)}" placeholder="-">
-        </div>`;
-      }
-      html += `</div>`;
-    } else {
-      // 表格布局
-      html += `<table class="field-table">`;
-      for (const f of fields) {
-        const val = fieldData[f] || '';
-        const shortLabel = f.includes('_') ? f.substring(f.indexOf('_') + 1) : f;
-        html += `<tr>
-          <td class="f-label">${escapeHtml(shortLabel)}</td>
-          <td><input class="field-edit ${val ? 'filled' : ''}" data-field="${escapeAttr(f)}" value="${escapeAttr(val)}" placeholder="点击填写..."></td>
-        </tr>`;
-      }
-      html += `</table>`;
-    }
-    html += `</div>`;
-  }
+  // Document HTML
+  html += docPreviewHtml;
 
   // Submit button
   html += `<button class="submit-edits-btn" id="submitEditsBtn" onclick="submitManualEdits()" ${isStreaming ? 'disabled' : ''}>提交手动填写</button>`;
@@ -932,98 +926,29 @@ function renderDocPreview() {
 
   body.innerHTML = html;
   previewRendered = true;
-  lastFieldListKey = parsedFields.join(',');
 }
 
-// ── Refresh only input values (without full re-render) ──
-function refreshFieldInputs() {
-  if (!previewRendered) {
-    // 首次渲染或有新字段时完整渲染
-    const newKey = parsedFields.join(',');
-    if (newKey !== lastFieldListKey) {
-      renderDocPreview();
-      return;
-    }
+// ── Refresh field values without re-rendering the whole document ──
+function refreshFieldValues() {
+  // Update progress
+  const totalFields = Object.keys(fieldMap).length;
+  let filledCount = 0;
+  for (const fid in fieldMap) {
+    if (fieldData[fid] && fieldData[fid].trim()) filledCount++;
   }
-
-  // 只更新已有 input 的值和样式
-  const inputs = document.querySelectorAll('.field-edit[data-field]');
-  inputs.forEach(input => {
-    const f = input.dataset.field;
-    const val = fieldData[f] || '';
-    if (document.activeElement !== input) {
-      input.value = val;
-    }
-    input.classList.toggle('filled', !!val.trim());
-  });
-
-  // 更新进度条
-  const { filled, total } = countFilled();
-  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+  const pct = totalFields > 0 ? Math.round(filledCount / totalFields * 100) : 0;
   const barFill = document.querySelector('.bar-fill');
   const barText = document.querySelector('.bar-text');
   if (barFill) barFill.style.width = pct + '%';
-  if (barText) barText.textContent = `${filled}/${total} 已填写`;
+  if (barText) barText.textContent = `${filledCount}/${totalFields} 已填写`;
+
+  // Update each field cell
+  for (const [fid, val] of Object.entries(fieldData)) {
+    updateCellInPreview(fid, val);
+  }
 }
 
-// ── Handle user editing a field ──
-function onFieldEdit(fieldName, value) {
-  fieldData[fieldName] = value;
-  const input = document.querySelector(`input[data-field="${fieldName}"]`);
-  if (input) input.classList.toggle('filled', !!value.trim());
-  // 更新进度条
-  const { filled, total } = countFilled();
-  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
-  const barFill = document.querySelector('.bar-fill');
-  const barText = document.querySelector('.bar-text');
-  if (barFill) barFill.style.width = pct + '%';
-  if (barText) barText.textContent = `${filled}/${total} 已填写`;
-}
-
-// ── Submit manually edited fields to agent ──
-async function submitManualEdits() {
-  // 收集所有手动填写的字段
-  const edits = {};
-  const inputs = document.querySelectorAll('.field-edit[data-field]');
-  inputs.forEach(input => {
-    const f = input.dataset.field;
-    const val = input.value.trim();
-    if (val) {
-      fieldData[f] = val;
-      edits[f] = val;
-    }
-  });
-
-  const editCount = Object.keys(edits).length;
-  if (editCount === 0) {
-    alert('没有填写任何字段');
-    return;
-  }
-
-  // 构造发给agent的消息
-  let msg = '我手动填写了以下字段信息：\n';
-  for (const [k, v] of Object.entries(edits)) {
-    msg += `- ${k}：${v}\n`;
-  }
-  msg += '\n请记录这些信息，继续下一步。';
-
-  appendMessage('user', `提交了 ${editCount} 个字段的手动填写`);
-  await callAgent(msg);
-}
-
-// ── Event delegation for field edits ──
-document.addEventListener('input', function(e) {
-  if (e.target.classList.contains('field-edit') && e.target.dataset.field) {
-    onFieldEdit(e.target.dataset.field, e.target.value);
-  }
-});
-document.addEventListener('change', function(e) {
-  if (e.target.classList.contains('field-edit') && e.target.dataset.field) {
-    onFieldEdit(e.target.dataset.field, e.target.value);
-  }
-});
-
-// ── Update Preview ──
+// ── Update Preview state ──
 function updatePreview(state) {
   const body = document.getElementById('previewBody');
   const title = document.getElementById('previewTitle');
@@ -1036,9 +961,9 @@ function updatePreview(state) {
           <h2>可选教务文档模板</h2>
           <table class="template-table">
             <tr><th style="width:50px;"></th><th>模板名称</th><th style="width:200px;">说明</th></tr>
-            <tr><td style="color:var(--text-muted);">1</td><td><span class="tpl-link" onclick="sendMessage('1')">评价报告</span></td><td style="color:var(--text-secondary);">专业课程目标达成度评价报告</td></tr>
-            <tr><td style="color:var(--text-muted);">2</td><td><span class="tpl-link" onclick="sendMessage('2')">试卷分析</span></td><td style="color:var(--text-secondary);">试卷分析表（考勤+分数分布）</td></tr>
-            <tr><td style="color:var(--text-muted);">3</td><td><span class="tpl-link" onclick="sendMessage('3')">关联矩阵</span></td><td style="color:var(--text-secondary);">考题与课程目标关联矩阵</td></tr>
+            <tr><td style="color:var(--text-muted);">1</td><td><span class="tpl-link" onclick="selectTemplate('评价报告')">评价报告</span></td><td style="color:var(--text-secondary);">专业课程目标达成度评价报告</td></tr>
+            <tr><td style="color:var(--text-muted);">2</td><td><span class="tpl-link" onclick="selectTemplate('试卷分析')">试卷分析</span></td><td style="color:var(--text-secondary);">试卷分析表（考勤+分数分布）</td></tr>
+            <tr><td style="color:var(--text-muted);">3</td><td><span class="tpl-link" onclick="selectTemplate('关联矩阵')">关联矩阵</span></td><td style="color:var(--text-secondary);">考题与课程目标关联矩阵</td></tr>
           </table>
           <p style="font-size:11px;color:var(--text-muted);margin-top:12px;text-align:center;">点击模板名称或回复编号选择</p>
         </div>`;
@@ -1046,21 +971,15 @@ function updatePreview(state) {
 
     case 'collecting':
       title.textContent = `信息收集${currentTemplate ? ' · ' + currentTemplate : ''}`;
-      // 如果有字段但预览还没渲染，渲染之
-      if (parsedFields.length > 0) {
-        const newKey = parsedFields.join(',');
-        if (newKey !== lastFieldListKey) {
-          renderDocPreview();
-        } else {
-          refreshFieldInputs();
-        }
+      if (docPreviewHtml) {
+        refreshFieldValues();
       }
       break;
 
     case 'confirm':
       title.textContent = '核对确认';
-      if (parsedFields.length > 0) {
-        refreshFieldInputs();
+      if (docPreviewHtml) {
+        refreshFieldValues();
       }
       break;
 
@@ -1087,8 +1006,16 @@ function updatePreview(state) {
 
     default:
       title.textContent = '文档预览';
-      body.innerHTML = `<div class="empty-state"><div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div><h4>文档预览区</h4><p>选择模板并填写信息后，生成的文档将在此展示。</p></div>`;
+      body.innerHTML = `<div class="empty-state"><div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div><h4>文档预览区</h4><p>选择模板后，原始文档将在此显示，您可以在此直接填写信息。</p></div>`;
   }
+}
+
+// ── Select a built-in template ──
+async function selectTemplate(name) {
+  currentTemplate = name;
+  currentTemplatePath = name;  // 后端支持模板名作为 path
+  await fetchDocPreview(name);
+  sendMessage(name);
 }
 
 // ── Function 1: Built-in Templates ──
@@ -1131,13 +1058,20 @@ async function handleTemplateUpload(event) {
     if (!resp.ok) throw new Error(`上传失败 HTTP ${resp.status}`);
     const result = await resp.json();
 
-    if (result.success && result.extracted_text) {
+    if (result.success) {
       const templatePath = result.template_path || '';
-      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_uploaded_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
-      await callAgent(agentMsg);
-    } else if (result.success && result.template_path) {
-      const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${result.template_path}，请用analyze_uploaded_template工具分析这个模板，识别出所有需要填写的字段。`;
-      await callAgent(agentMsg);
+      currentTemplatePath = templatePath;
+
+      // 获取文档预览
+      await fetchDocPreview(templatePath);
+
+      if (result.extracted_text) {
+        const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_uploaded_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
+        await callAgent(agentMsg);
+      } else if (templatePath) {
+        const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}，请用analyze_uploaded_template工具分析这个模板，识别出所有需要填写的字段。`;
+        await callAgent(agentMsg);
+      }
     } else {
       appendMessage('assistant', `模板解析失败：${result.error || '未知错误'}，请确保上传的是.docx格式的Word文件。`);
     }
@@ -1190,6 +1124,70 @@ function highlightUploadBtn() {
 function downloadDoc() {
   if (currentDownloadUrl) window.open(currentDownloadUrl);
 }
+
+// ── Submit manually edited fields to agent ──
+async function submitManualEdits() {
+  // 收集所有可编辑字段的当前值
+  const edits = {};
+  const els = document.querySelectorAll('[data-field-id][contenteditable]');
+  els.forEach(el => {
+    const fid = el.dataset.fieldId;
+    const val = el.textContent.trim();
+    if (val) {
+      fieldData[fid] = val;
+      edits[fid] = val;
+      manuallyEditedFields[fid] = true;
+    }
+  });
+
+  const editCount = Object.keys(edits).length;
+  if (editCount === 0) {
+    alert('没有填写任何字段');
+    return;
+  }
+
+  // 按 label 分组输出
+  let msg = '我手动填写了以下信息：\n';
+  for (const [fid, val] of Object.entries(edits)) {
+    const label = fieldMap[fid]?.label || fid;
+    msg += `- ${label}：${val}\n`;
+  }
+  msg += '\n请记录这些信息，继续下一步。';
+
+  appendMessage('user', `提交了 ${editCount} 个字段的手动填写`);
+  await callAgent(msg);
+}
+
+// ── Event delegation for contenteditable changes ──
+document.addEventListener('input', function(e) {
+  const el = e.target;
+  if (el.hasAttribute('data-field-id') && el.hasAttribute('contenteditable')) {
+    const fid = el.dataset.fieldId;
+    const val = el.textContent.trim();
+    fieldData[fid] = val;
+    manuallyEditedFields[fid] = true;
+
+    // Update visual state
+    if (el.classList.contains('cell-value')) {
+      el.classList.toggle('filled', !!val);
+    } else if (el.classList.contains('editable')) {
+      el.classList.toggle('empty', !val);
+      el.classList.toggle('filled', !!val);
+    }
+
+    // Update progress
+    const totalFields = Object.keys(fieldMap).length;
+    let filledCount = 0;
+    for (const f in fieldMap) {
+      if (fieldData[f] && fieldData[f].trim()) filledCount++;
+    }
+    const pct = totalFields > 0 ? Math.round(filledCount / totalFields * 100) : 0;
+    const barFill = document.querySelector('.bar-fill');
+    const barText = document.querySelector('.bar-text');
+    if (barFill) barFill.style.width = pct + '%';
+    if (barText) barText.textContent = `${filledCount}/${totalFields} 已填写`;
+  }
+});
 
 // ── Markdown Render ──
 function renderMarkdown(text) {

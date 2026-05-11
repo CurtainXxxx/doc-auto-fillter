@@ -585,6 +585,44 @@ async def upload_template_file(file: UploadFile = File(...)):
     })
 
 
+@app.get("/template-preview")
+async def template_preview(path: str = ""):
+    """将 docx 模板转为 HTML 预览，返回 HTML + 字段映射"""
+    if not path:
+        return JSONResponse(content={"success": False, "message": "缺少 path 参数"})
+
+    # 支持 path 是模板名（评价报告/试卷分析/关联矩阵）或文件路径
+    workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    full_path = path
+
+    # 内置模板名
+    template_map = {
+        "评价报告": "2023-2024-2《xxx》 岭南师范学院专业课程目标达成度评价报告模板.docx",
+        "试卷分析": "2023-2024-2《xxx》 试卷分析模板.docx",
+        "关联矩阵": "2023-2024-2《xxx》岭南师范学院考题与课程目标及毕业要求关联矩阵表模板.docx",
+    }
+    if path in template_map:
+        full_path = os.path.join(workspace, "assets", template_map[path])
+    elif not os.path.isabs(path):
+        full_path = os.path.join(workspace, path)
+
+    if not os.path.exists(full_path):
+        return JSONResponse(content={"success": False, "message": f"文件不存在: {path}"})
+
+    try:
+        from docx_preview import docx_to_html
+        result = docx_to_html(full_path)
+        return JSONResponse(content={
+            "success": True,
+            "html": result["html"],
+            "field_map": result["field_map"],
+            "label_to_fields": result["label_to_fields"],
+        })
+    except Exception as e:
+        logger.exception("template-preview failed")
+        return JSONResponse(content={"success": False, "message": f"预览生成失败: {e}"})
+
+
 @app.get(path="/graph_parameter")
 async def http_graph_inout_parameter(request: Request):
     return service.graph_inout_schema()
