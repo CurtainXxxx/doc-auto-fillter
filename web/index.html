@@ -1152,7 +1152,11 @@ function downloadDoc() {
 // ── Markdown Render ──
 function renderMarkdown(text) {
   let html = escapeHtml(text);
-  html = html.replace(/(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
+  // 1. 先处理 markdown 链接 [文字](url.docx) → 单个下载按钮
+  html = html.replace(/\[([^\]]*)\]\((https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)\)/g,
+    '<a class="download-link" href="$2" target="_blank">下载文档</a>');
+  // 2. 再处理裸 URL（避免重复匹配已被上面替换的链接）
+  html = html.replace(/(?<!href=")(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
     '<a class="download-link" href="$1" target="_blank">下载文档</a>');
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/^- (.+)$/gm, '<div style="padding-left:12px;opacity:0.9;">· $1</div>');
