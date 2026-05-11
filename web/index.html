@@ -670,6 +670,18 @@ async function sendMessage(text) {
   if (!msg || isStreaming) return;
   if (!text) { input.value = ''; input.style.height = 'auto'; }
   appendMessage('user', msg);
+
+  // 检测用户消息中的模板关键词，立即加载预览
+  const tplKeywords = ['评价报告', '试卷分析', '关联矩阵'];
+  for (const kw of tplKeywords) {
+    if (msg.includes(kw) && currentTemplate !== kw) {
+      currentTemplate = kw;
+      currentTemplatePath = kw;
+      fetchDocPreview(kw);
+      break;
+    }
+  }
+
   await callAgent(msg);
 }
 
@@ -833,6 +845,16 @@ function postProcessResponse(text) {
     currentStep = 1; updatePreview('template-select');
   }
 
+  // 检测模板选择，自动加载文档预览
+  const tplKeywords = ['评价报告', '试卷分析', '关联矩阵'];
+  for (const kw of tplKeywords) {
+    if (text.includes(kw) && currentTemplate !== kw) {
+      currentTemplate = kw;
+      currentTemplatePath = kw;
+      fetchDocPreview(kw);  // 自动加载右侧文档预览
+      break;
+    }
+  }
   if ((text.includes('评价报告') || text.includes('试卷分析') || text.includes('关联矩阵')) && currentStep === 1) {
     const tplMatch = text.match(/(评价报告|试卷分析|关联矩阵)/);
     if (tplMatch) currentTemplate = tplMatch[1];
@@ -877,12 +899,20 @@ function updateStepBar() {
 
 // ── Fetch document preview from backend ──
 async function fetchDocPreview(templatePath) {
-  if (!BASE_URL) return;
+  if (!BASE_URL) {
+    console.warn('fetchDocPreview: BASE_URL not set, skipping');
+    return;
+  }
   try {
     const url = `${BASE_URL}/template-preview?path=${encodeURIComponent(templatePath)}`;
+    console.log('fetchDocPreview: fetching', url);
     const resp = await fetch(url);
-    if (!resp.ok) return;
+    if (!resp.ok) {
+      console.warn('fetchDocPreview: HTTP', resp.status, await resp.text());
+      return;
+    }
     const result = await resp.json();
+    console.log('fetchDocPreview: result success=', result.success, 'html_len=', (result.html||'').length);
     if (result.success) {
       docPreviewHtml = result.html;
       fieldMap = result.field_map || {};
@@ -890,7 +920,7 @@ async function fetchDocPreview(templatePath) {
       renderDocPreview();
     }
   } catch (e) {
-    console.warn('fetchDocPreview failed:', e);
+    console.error('fetchDocPreview failed:', e);
   }
 }
 
@@ -956,6 +986,11 @@ function updatePreview(state) {
   switch(state) {
     case 'template-select':
       title.textContent = '选择模板';
+      // 如果已加载文档预览，不要覆盖
+      if (docPreviewHtml) {
+        refreshFieldValues();
+        break;
+      }
       body.innerHTML = `
         <div class="doc-page" style="max-width:520px;padding:36px;">
           <h2>可选教务文档模板</h2>

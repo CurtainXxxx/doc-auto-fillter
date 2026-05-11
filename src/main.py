@@ -610,7 +610,7 @@ async def template_preview(path: str = ""):
         return JSONResponse(content={"success": False, "message": f"文件不存在: {path}"})
 
     try:
-        from docx_preview import docx_to_html
+        from tools.docx_preview import docx_to_html
         result = docx_to_html(full_path)
         return JSONResponse(content={
             "success": True,
