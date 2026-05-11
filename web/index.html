@@ -3,34 +3,33 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>教务文档助手</title>
+<title>教务文档生成</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --primary: #4F46E5;
-  --primary-light: #6366F1;
-  --primary-lighter: #EEF2FF;
-  --primary-soft: #F5F3FF;
-  --bg: #F8F9FC;
+  --primary: #2563EB;
+  --primary-light: #3B82F6;
+  --primary-lighter: #EFF6FF;
+  --primary-soft: #F0F5FF;
+  --bg: #F5F6F8;
   --surface: #FFFFFF;
-  --border: #E8EBF0;
-  --border-light: #F0F2F5;
-  --text: #1E1E2E;
-  --text-secondary: #8B8FA3;
-  --text-muted: #B0B5C6;
-  --success: #10B981;
+  --border: #DEE1E6;
+  --border-light: #EBEEF2;
+  --text: #1A1D23;
+  --text-secondary: #6B7280;
+  --text-muted: #9CA3AF;
+  --success: #059669;
   --success-bg: #ECFDF5;
   --success-border: #A7F3D0;
-  --warning: #F59E0B;
-  --danger: #EF4444;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-  --shadow: 0 2px 8px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  --warning: #D97706;
+  --danger: #DC2626;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.1);
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 10px;
 }
 
 html, body {
@@ -62,41 +61,41 @@ html, body {
 
 /* Header */
 .chat-header {
-  padding: 16px 20px;
+  padding: 14px 20px;
   display: flex;
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--border-light);
+  background: var(--surface);
 }
 .chat-header .avatar {
-  width: 42px; height: 42px;
-  border-radius: var(--radius);
-  background: linear-gradient(135deg, var(--primary), #818CF8);
+  width: 36px; height: 36px;
+  border-radius: 6px;
+  background: var(--primary);
   display: flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 20px;
-  box-shadow: 0 2px 8px rgba(79,70,229,0.25);
+  color: #fff; font-size: 14px; font-weight: 700;
+  letter-spacing: -0.5px;
 }
 .chat-header .info h2 {
-  font-size: 16px; font-weight: 600; color: var(--text);
-  letter-spacing: -0.01em;
+  font-size: 15px; font-weight: 600; color: var(--text);
 }
 .chat-header .info p {
-  font-size: 12px; color: var(--text-secondary); margin-top: 1px;
+  font-size: 12px; color: var(--text-muted); margin-top: 1px;
   display: flex; align-items: center; gap: 6px;
 }
 .chat-header .info p::before {
   content: ''; display: inline-block;
-  width: 6px; height: 6px; border-radius: 50%;
+  width: 5px; height: 5px; border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 0 3px var(--success-bg);
 }
 
 /* Steps Bar */
 .steps-bar {
   display: flex;
-  padding: 12px 16px;
+  padding: 10px 16px;
   gap: 4px;
   border-bottom: 1px solid var(--border-light);
+  background: #FAFBFC;
 }
 .steps-bar .step {
   flex: 1;
@@ -104,8 +103,8 @@ html, body {
   font-size: 11px;
   color: var(--text-muted);
   position: relative;
-  padding-top: 18px;
-  transition: color 0.3s;
+  padding-top: 16px;
+  transition: color 0.2s;
   white-space: nowrap;
 }
 .steps-bar .step::before {
@@ -113,21 +112,21 @@ html, body {
   position: absolute;
   top: 0; left: 50%;
   transform: translateX(-50%);
-  width: 8px; height: 8px;
+  width: 7px; height: 7px;
   border-radius: 50%;
   background: var(--border);
-  transition: all 0.3s;
+  transition: all 0.2s;
   z-index: 2;
 }
 .steps-bar .step::after {
   content: '';
   position: absolute;
   top: 3px;
-  left: calc(50% + 16px);
-  right: calc(-50% + 16px);
-  height: 2px;
+  left: calc(50% + 14px);
+  right: calc(-50% + 14px);
+  height: 1px;
   background: var(--border);
-  transition: background 0.3s;
+  transition: background 0.2s;
   z-index: 1;
 }
 .steps-bar .step:last-child::after { display: none; }
@@ -137,8 +136,7 @@ html, body {
 }
 .steps-bar .step.active::before {
   background: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-lighter);
-  width: 10px; height: 10px;
+  width: 9px; height: 9px;
   top: -1px;
 }
 .steps-bar .step.active::after { background: var(--primary-light); }
@@ -147,7 +145,6 @@ html, body {
 }
 .steps-bar .step.done::before {
   background: var(--success);
-  box-shadow: 0 0 0 3px var(--success-bg);
 }
 .steps-bar .step.done::after { background: var(--success); }
 
@@ -155,10 +152,10 @@ html, body {
 .chat-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   scroll-behavior: smooth;
 }
 .chat-messages::-webkit-scrollbar { width: 4px; }
@@ -168,53 +165,46 @@ html, body {
 /* Message Bubbles */
 .msg {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   max-width: 100%;
-  animation: fadeIn 0.25s ease;
 }
 .msg.user { flex-direction: row-reverse; }
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
 
 .msg .avatar-icon {
-  width: 32px; height: 32px;
-  border-radius: var(--radius-sm);
+  width: 28px; height: 28px;
+  border-radius: 4px;
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 14px;
+  font-size: 11px; font-weight: 700;
   align-self: flex-end;
 }
 .msg.assistant .avatar-icon {
-  background: linear-gradient(135deg, var(--primary), #818CF8);
+  background: var(--primary);
   color: #fff;
-  box-shadow: 0 1px 4px rgba(79,70,229,0.2);
 }
 .msg.user .avatar-icon {
-  background: #F1F3F8;
+  background: #E5E7EB;
   color: var(--text-secondary);
 }
 
 .msg .bubble {
-  max-width: 84%;
-  padding: 10px 14px;
-  border-radius: 14px;
-  font-size: 13.5px;
+  max-width: 85%;
+  padding: 9px 13px;
+  border-radius: var(--radius);
+  font-size: 13px;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
 }
 .msg.assistant .bubble {
-  background: var(--primary-soft);
+  background: #F4F5F7;
   color: var(--text);
-  border-bottom-left-radius: 6px;
+  border-bottom-left-radius: 3px;
 }
 .msg.user .bubble {
   background: var(--primary);
   color: #fff;
-  border-bottom-right-radius: 6px;
-  box-shadow: 0 2px 8px rgba(79,70,229,0.2);
+  border-bottom-right-radius: 3px;
 }
 
 /* Typing dots */
@@ -222,7 +212,7 @@ html, body {
   display: inline-flex; gap: 4px; padding: 4px 2px;
 }
 .typing-dots span {
-  width: 5px; height: 5px;
+  width: 4px; height: 4px;
   border-radius: 50%;
   background: var(--text-muted);
   animation: bounce 1.4s infinite;
@@ -231,75 +221,72 @@ html, body {
 .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes bounce {
   0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-6px); opacity: 1; }
+  30% { transform: translateY(-4px); opacity: 1; }
 }
 
 /* Download link in bubble */
 .download-link {
-  display: inline-flex; align-items: center; gap: 6px;
-  margin-top: 8px; padding: 8px 16px;
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-top: 6px; padding: 6px 14px;
   background: var(--primary); color: #fff !important;
   border-radius: var(--radius-sm); text-decoration: none;
-  font-size: 13px; font-weight: 500;
-  transition: all 0.2s;
-  box-shadow: 0 2px 6px rgba(79,70,229,0.2);
+  font-size: 12.5px; font-weight: 500;
+  transition: background 0.15s;
 }
 .download-link:hover {
   background: var(--primary-light);
-  box-shadow: 0 4px 12px rgba(79,70,229,0.3);
-  transform: translateY(-1px);
 }
 
 /* Choice box in bubble */
 .choice-box {
-  margin-top: 8px; padding: 10px 14px;
+  margin-top: 8px; padding: 8px 12px;
   background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-size: 13px;
 }
 .choice-box .choice-title {
-  font-weight: 600; margin-bottom: 8px;
-  color: var(--primary); font-size: 12px; text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 600; margin-bottom: 6px;
+  color: var(--primary); font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 .choice-box label {
   display: flex; align-items: center; gap: 8px;
-  padding: 6px 8px; cursor: pointer;
-  border-radius: 6px; transition: background 0.15s;
+  padding: 5px 6px; cursor: pointer;
+  border-radius: 4px; transition: background 0.1s;
 }
-.choice-box label:hover { background: var(--primary-soft); }
+.choice-box label:hover { background: var(--primary-lighter); }
 .choice-box input[type="radio"] { accent-color: var(--primary); }
 
 /* File card */
 .file-card {
-  margin-top: 8px; padding: 12px 14px;
+  margin-top: 6px; padding: 8px 12px;
   background: var(--success-bg); border: 1px solid var(--success-border);
-  border-radius: var(--radius-sm); font-size: 13px;
-  display: flex; align-items: center; gap: 10px;
+  border-radius: var(--radius-sm); font-size: 12px;
+  display: flex; align-items: center; gap: 8px;
 }
-.file-card .file-icon { font-size: 22px; }
+.file-card .file-icon { font-size: 14px; color: var(--success); }
 .file-card .file-info { flex: 1; }
 .file-card .file-name { font-weight: 500; color: var(--text); }
-.file-card .file-size { color: var(--text-secondary); font-size: 11px; }
+.file-card .file-size { color: var(--text-secondary); font-size: 10.5px; }
 
 /* ── Function Panel ── */
 .func-panel {
   border-top: 1px solid var(--border);
   background: #FAFBFC;
-  padding: 12px 16px;
+  padding: 10px 14px;
 }
 .func-panel .func-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 6px;
 }
 .func-btn {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 14px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--surface);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
   font-size: 12px;
   font-family: inherit;
   color: var(--text);
@@ -307,35 +294,34 @@ html, body {
 }
 .func-btn:hover {
   border-color: var(--primary-light);
-  background: var(--primary-soft);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
+  background: var(--primary-lighter);
 }
 .func-btn .func-icon {
-  font-size: 20px;
+  font-size: 14px;
   flex-shrink: 0;
-  width: 36px; height: 36px;
-  border-radius: var(--radius-sm);
-  background: var(--primary-soft);
+  width: 28px; height: 28px;
+  border-radius: 4px;
+  background: var(--primary-lighter);
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s;
+  transition: all 0.15s;
+  color: var(--primary);
 }
 .func-btn:hover .func-icon {
   background: var(--primary);
+  color: #fff;
 }
-.func-btn .func-text { line-height: 1.4; }
+.func-btn .func-text { line-height: 1.35; }
 .func-btn .func-text .title {
   font-weight: 600; font-size: 12px; display: block;
 }
 .func-btn .func-text .desc {
-  font-size: 10.5px; color: var(--text-secondary);
+  font-size: 10px; color: var(--text-secondary);
   display: block; margin-top: 1px;
 }
 
 .func-btn.active {
   border-color: var(--primary);
   background: var(--primary-lighter);
-  box-shadow: 0 0 0 3px rgba(79,70,229,0.08);
 }
 .func-btn.active .func-icon {
   background: var(--primary);
@@ -346,25 +332,25 @@ html, body {
 
 /* ── Chat Input ── */
 .chat-input {
-  padding: 12px 16px;
+  padding: 10px 14px;
   border-top: 1px solid var(--border);
-  display: flex; gap: 8px; align-items: flex-end;
+  display: flex; gap: 6px; align-items: flex-end;
   background: var(--surface);
 }
 .chat-input .upload-btn {
-  width: 40px; height: 40px;
+  width: 36px; height: 36px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: var(--surface);
-  cursor: pointer; font-size: 16px;
+  cursor: pointer; font-size: 14px;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s; flex-shrink: 0;
+  transition: all 0.15s; flex-shrink: 0;
   color: var(--text-secondary); position: relative; overflow: hidden;
 }
 .chat-input .upload-btn:hover {
   border-color: var(--primary-light);
   color: var(--primary);
-  background: var(--primary-soft);
+  background: var(--primary-lighter);
 }
 .chat-input .upload-btn input[type="file"] {
   position: absolute; top: 0; left: 0;
@@ -372,70 +358,65 @@ html, body {
 }
 .chat-input textarea {
   flex: 1; resize: none;
-  border: 1.5px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 14px;
-  font-size: 13.5px; font-family: inherit; line-height: 1.5;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 13px; font-family: inherit; line-height: 1.5;
   max-height: 100px; outline: none;
-  transition: all 0.2s;
+  transition: border-color 0.15s;
   background: #FAFBFC;
 }
 .chat-input textarea:focus {
   border-color: var(--primary);
   background: var(--surface);
-  box-shadow: 0 0 0 3px rgba(79,70,229,0.06);
 }
 .chat-input textarea::placeholder { color: var(--text-muted); }
 .chat-input .send-btn {
-  width: 40px; height: 40px;
-  border: none; border-radius: var(--radius);
+  width: 36px; height: 36px;
+  border: none; border-radius: var(--radius-sm);
   cursor: pointer;
-  background: var(--primary); color: #fff; font-size: 16px;
+  background: var(--primary); color: #fff; font-size: 14px;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.2s; flex-shrink: 0;
-  box-shadow: 0 2px 6px rgba(79,70,229,0.25);
+  transition: background 0.15s; flex-shrink: 0;
 }
 .chat-input .send-btn:hover {
   background: var(--primary-light);
-  box-shadow: 0 4px 12px rgba(79,70,229,0.35);
-  transform: translateY(-1px);
 }
-.chat-input .send-btn:active { transform: scale(0.96); }
+.chat-input .send-btn:active { opacity: 0.85; }
 .chat-input .send-btn:disabled {
   background: #D1D5DB; cursor: not-allowed;
-  box-shadow: none; transform: none;
 }
 
 /* ── Right Panel: Preview ── */
 .preview-panel {
   flex: 1;
   display: flex; flex-direction: column;
-  background: linear-gradient(180deg, #FBFCFE 0%, #F5F7FA 100%);
+  background: var(--bg);
   min-width: 0;
 }
 .preview-header {
-  padding: 14px 24px;
+  padding: 12px 24px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; justify-content: space-between;
 }
 .preview-header .title-area {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; gap: 8px;
 }
 .preview-header .title-area h3 {
-  font-size: 15px; font-weight: 600; color: var(--text);
+  font-size: 14px; font-weight: 600; color: var(--text);
 }
 .preview-header .actions {
-  display: flex; gap: 8px;
+  display: flex; gap: 6px;
 }
 .preview-header .actions button {
-  padding: 7px 16px;
+  padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  font-size: 12.5px; cursor: pointer;
-  transition: all 0.2s;
-  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; cursor: pointer;
+  transition: all 0.15s;
+  display: flex; align-items: center; gap: 4px;
   color: var(--text-secondary);
   font-family: inherit;
 }
@@ -446,16 +427,14 @@ html, body {
 .preview-header .actions button.primary {
   background: var(--primary); color: #fff;
   border-color: var(--primary);
-  box-shadow: 0 2px 6px rgba(79,70,229,0.2);
 }
 .preview-header .actions button.primary:hover {
   background: var(--primary-light);
-  box-shadow: 0 4px 12px rgba(79,70,229,0.3);
 }
 
 .preview-body {
   flex: 1; overflow: auto;
-  padding: 32px;
+  padding: 28px;
   display: flex; justify-content: center;
   align-items: flex-start;
 }
@@ -468,29 +447,31 @@ html, body {
   text-align: center;
   color: var(--text-secondary);
   margin-top: 80px;
-  max-width: 320px;
+  max-width: 300px;
 }
 .empty-state .icon-wrap {
-  width: 72px; height: 72px;
-  border-radius: 50%;
-  background: var(--primary-soft);
+  width: 56px; height: 56px;
+  border-radius: var(--radius);
+  background: var(--primary-lighter);
   display: flex; align-items: center; justify-content: center;
-  margin: 0 auto 16px;
-  font-size: 32px;
+  margin: 0 auto 14px;
+}
+.empty-state .icon-wrap svg {
+  width: 24px; height: 24px; color: var(--primary);
 }
 .empty-state h4 {
-  font-size: 16px; color: var(--text); margin-bottom: 8px;
+  font-size: 15px; color: var(--text); margin-bottom: 6px;
   font-weight: 600;
 }
 .empty-state p {
-  font-size: 13px; line-height: 1.7; color: var(--text-secondary);
+  font-size: 12.5px; line-height: 1.7; color: var(--text-secondary);
 }
 
 /* Document Page Preview */
 .doc-page {
   background: var(--surface);
   box-shadow: var(--shadow-md);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   width: 100%; max-width: 860px;
   min-height: 540px;
   padding: 44px 52px;
@@ -522,9 +503,9 @@ html, body {
   display: inline-block; min-width: 60px; min-height: 22px;
   padding: 3px 10px;
   background: #EFF6FF; border: 1.5px dashed #93C5FD;
-  border-radius: 4px; cursor: pointer;
+  border-radius: 3px; cursor: pointer;
   color: #3B82F6; font-size: 10.5pt; font-family: inherit;
-  transition: all 0.2s; text-align: center;
+  transition: all 0.15s; text-align: center;
 }
 .field-placeholder:hover {
   background: #DBEAFE; border-color: #60A5FA;
@@ -537,10 +518,10 @@ html, body {
 /* Generating spinner */
 .generating {
   display: flex; flex-direction: column; align-items: center;
-  gap: 20px; margin-top: 100px;
+  gap: 16px; margin-top: 100px;
 }
 .generating .spinner {
-  width: 48px; height: 48px;
+  width: 36px; height: 36px;
   border: 3px solid var(--border);
   border-top-color: var(--primary);
   border-radius: 50%;
@@ -548,45 +529,49 @@ html, body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .generating p {
-  font-size: 14px; color: var(--text-secondary);
+  font-size: 13px; color: var(--text-secondary);
 }
 
 /* Document Done Card */
 .doc-done-card {
   background: var(--surface);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   width: 100%; max-width: 480px;
-  padding: 44px; text-align: center;
+  padding: 40px; text-align: center;
 }
-.doc-done-card .icon {
-  font-size: 52px; margin-bottom: 16px;
+.doc-done-card .done-icon {
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--success-bg);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 14px;
+}
+.doc-done-card .done-icon svg {
+  width: 22px; height: 22px; color: var(--success);
 }
 .doc-done-card h4 {
-  font-size: 18px; font-weight: 600; margin-bottom: 8px;
+  font-size: 16px; font-weight: 600; margin-bottom: 6px;
 }
 .doc-done-card p {
-  color: var(--text-secondary); font-size: 13px;
+  color: var(--text-secondary); font-size: 12.5px;
 }
 .doc-done-card .dl-btn {
-  display: inline-flex; align-items: center; gap: 8px;
-  margin-top: 20px; padding: 12px 28px;
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 18px; padding: 10px 24px;
   background: var(--primary); color: #fff;
-  border-radius: var(--radius); text-decoration: none;
-  font-size: 14px; font-weight: 500;
-  transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(79,70,229,0.25);
+  border-radius: var(--radius-sm); text-decoration: none;
+  font-size: 13px; font-weight: 500;
+  transition: background 0.15s;
 }
 .doc-done-card .dl-btn:hover {
   background: var(--primary-light);
-  box-shadow: 0 6px 20px rgba(79,70,229,0.35);
-  transform: translateY(-1px);
 }
 .doc-done-card .checks {
-  margin-top: 20px; text-align: left;
+  margin-top: 18px; text-align: left;
   background: var(--success-bg);
   border-radius: var(--radius-sm);
-  padding: 14px 18px; font-size: 13px;
+  padding: 12px 16px; font-size: 12px;
   color: var(--success); line-height: 2;
 }
 
@@ -594,15 +579,15 @@ html, body {
 .template-table {
   width: 100%;
   border-collapse: collapse;
-  margin-top: 16px;
+  margin-top: 14px;
 }
 .template-table th {
   background: #F9FAFB; color: var(--text-secondary);
   font-size: 11px; text-transform: uppercase;
-  letter-spacing: 0.05em; padding: 10px 14px;
+  letter-spacing: 0.04em; padding: 8px 14px;
 }
 .template-table td {
-  padding: 14px;
+  padding: 12px;
   border-bottom: 1px solid var(--border-light);
   font-size: 13px;
 }
@@ -610,7 +595,7 @@ html, body {
 .template-table .tpl-link {
   color: var(--primary); cursor: pointer;
   font-weight: 500;
-  transition: color 0.2s;
+  transition: color 0.15s;
 }
 .template-table .tpl-link:hover {
   color: var(--primary-light);
@@ -619,21 +604,21 @@ html, body {
 /* Upload drop zone */
 .upload-drop-zone {
   border: 2px dashed var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius);
   padding: 48px; text-align: center;
-  cursor: pointer; transition: all 0.25s;
+  cursor: pointer; transition: all 0.2s;
   width: 100%; max-width: 460px;
 }
 .upload-drop-zone:hover, .upload-drop-zone.dragover {
   border-color: var(--primary);
-  background: var(--primary-soft);
+  background: var(--primary-lighter);
 }
 .upload-drop-zone .icon {
-  font-size: 40px; margin-bottom: 12px; opacity: 0.4;
+  font-size: 36px; margin-bottom: 12px; opacity: 0.35;
 }
-.upload-drop-zone p { font-size: 14px; color: var(--text-secondary); }
+.upload-drop-zone p { font-size: 13px; color: var(--text-secondary); }
 .upload-drop-zone .hint {
-  font-size: 12px; color: var(--text-muted); margin-top: 6px;
+  font-size: 11px; color: var(--text-muted); margin-top: 6px;
 }
 
 /* ── Responsive ── */
@@ -651,10 +636,10 @@ html, body {
   <!-- ── Left: Chat Panel ── -->
   <div class="chat-panel">
     <div class="chat-header">
-      <div class="avatar">🎓</div>
+      <div class="avatar">文</div>
       <div class="info">
-        <h2>教务文档助手</h2>
-        <p>数字员工 · 在线</p>
+        <h2>教务文档生成</h2>
+        <p>自动填写工具</p>
       </div>
     </div>
 
@@ -671,20 +656,20 @@ html, body {
     <div class="func-panel">
       <div class="func-grid">
         <button class="func-btn" id="funcAutoFill" onclick="startAutoFill()">
-          <span class="func-icon">🤖</span>
+          <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg></span>
           <span class="func-text"><span class="title">内置模板</span><span class="desc">选择预设模板生成</span></span>
         </button>
         <button class="func-btn" id="funcUploadTpl" onclick="triggerTemplateUpload()">
-          <span class="func-icon">📄</span>
-          <span class="func-text"><span class="title">上传模板</span><span class="desc">上传任意docx自动识别</span></span>
+          <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg></span>
+          <span class="func-text"><span class="title">上传模板</span><span class="desc">上传docx自动识别</span></span>
         </button>
-        <button class="func-btn" id="funcCoFill" onclick="startCoFill()" style="opacity:0.45;cursor:not-allowed;" title="开发中">
-          <span class="func-icon">✍️</span>
-          <span class="func-text"><span class="title">人机协同填写</span><span class="desc">人工填写AI补全</span></span>
+        <button class="func-btn" id="funcCoFill" onclick="startCoFill()" style="opacity:0.4;cursor:not-allowed;" title="开发中">
+          <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+          <span class="func-text"><span class="title">人机协同填写</span><span class="desc">人工填写智能补全</span></span>
         </button>
         <button class="func-btn" id="funcUpload" onclick="triggerUpload()">
-          <span class="func-icon">📎</span>
-          <span class="func-text"><span class="title">知识文件上传</span><span class="desc">上传文件AI自动提取</span></span>
+          <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></span>
+          <span class="func-text"><span class="title">知识文件上传</span><span class="desc">上传文件自动提取</span></span>
         </button>
       </div>
       <input type="file" id="templateFileInput" accept=".docx,.doc" style="display:none" onchange="handleTemplateUpload(event)" />
@@ -692,12 +677,12 @@ html, body {
 
     <div class="chat-input">
       <div class="upload-btn" title="上传文件">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
         <input type="file" id="fileInput" accept=".docx,.doc,.pdf,.xlsx,.xls,.csv,.txt" onchange="handleFileUpload(event)" />
       </div>
-      <textarea id="userInput" rows="1" placeholder="输入消息..." onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
+      <textarea id="userInput" rows="1" placeholder="输入信息..." onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
       <button class="send-btn" id="sendBtn" onclick="sendMessage()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
     </div>
   </div>
@@ -715,9 +700,9 @@ html, body {
     </div>
     <div class="preview-body" id="previewBody">
       <div class="empty-state">
-        <div class="icon-wrap">📋</div>
+        <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div>
         <h4>文档预览区</h4>
-        <p>选择模板并填写信息后，生成的文档将在此实时展示。</p>
+        <p>选择模板并填写信息后，生成的文档将在此展示。</p>
       </div>
     </div>
   </div>
@@ -750,12 +735,10 @@ if (!BASE_URL || !API_URL) {
     const body = document.getElementById('previewBody');
     body.innerHTML = `
       <div class="doc-done-card" style="border:2px solid #FDE68A;">
-        <div class="icon">⚠️</div>
         <h4>请通过 Web 服务访问</h4>
         <p style="margin:12px 0;line-height:2;">
           当前为静态文件预览，无法连接后端服务。<br>
-          请在 Coze 平台右上角点击 <strong>「部署」</strong>，<br>
-          通过部署链接打开此页面。
+          请在平台点击「部署」，通过部署链接打开此页面。
         </p>
       </div>`;
     document.getElementById('userInput').disabled = true;
@@ -790,7 +773,7 @@ function appendMessage(role, content, extra) {
   const container = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = `msg ${role}`;
-  const icon = role === 'assistant' ? '🎓' : '👤';
+  const icon = role === 'assistant' ? '文' : '我';
   let bubbleHtml = escapeHtml(content);
   if (extra) bubbleHtml += extra;
   div.innerHTML = `<div class="avatar-icon">${icon}</div><div class="bubble">${bubbleHtml}</div>`;
@@ -804,7 +787,7 @@ function createStreamingMessage() {
   const container = document.getElementById('chatMessages');
   const div = document.createElement('div');
   div.className = 'msg assistant';
-  div.innerHTML = `<div class="avatar-icon">🎓</div><div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+  div.innerHTML = `<div class="avatar-icon">文</div><div class="bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
@@ -892,10 +875,9 @@ function postProcessResponse(text) {
     if (tplMatch) currentTemplate = tplMatch[1];
   }
 
-  // 上传模板模式：Agent识别到字段后进入收集阶段
+  // 上传模板模式：识别到字段后进入收集阶段
   if (text.includes('识别到') && text.includes('字段') && currentStep === 0) {
     currentStep = 1; updateStepBar();
-    // 提取模板文件名
     const tplFileMatch = text.match(/模板[：:]?\s*(\S+\.docx?)/);
     if (tplFileMatch) currentTemplate = tplFileMatch[1];
   }
@@ -1076,20 +1058,20 @@ function updatePreview(state) {
 
     case 'generating':
       title.textContent = '生成中...';
-      body.innerHTML = `<div class="generating"><div class="spinner"></div><p>正在生成文档，请稍候...</p></div>`;
+      body.innerHTML = `<div class="generating"><div class="spinner"></div><p>正在生成文档...</p></div>`;
       break;
 
     case 'done':
       title.textContent = '文档已生成';
       body.innerHTML = `
         <div class="doc-done-card">
-          <div class="icon">🎉</div>
-          <h4>文档生成成功</h4>
-          <p>格式与模板 100% 一致</p>
+          <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
+          <h4>文档生成完成</h4>
+          <p>格式与模板一致</p>
           <a href="${currentDownloadUrl}" target="_blank" class="dl-btn">下载 Word 文档</a>
           <div class="checks">
-            · 文档格式与模板完全一致<br>
-            · 所有字段已正确填入<br>
+            · 文档格式与模板一致<br>
+            · 所有字段已填入<br>
             · 链接 24 小时内有效
           </div>
         </div>`;
@@ -1097,7 +1079,7 @@ function updatePreview(state) {
 
     default:
       title.textContent = '文档预览';
-      body.innerHTML = `<div class="empty-state"><div class="icon-wrap">📋</div><h4>文档预览区</h4><p>选择模板并填写信息后，生成的文档将在此实时展示。</p></div>`;
+      body.innerHTML = `<div class="empty-state"><div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div><h4>文档预览区</h4><p>选择模板并填写信息后，生成的文档将在此展示。</p></div>`;
   }
 }
 
@@ -1154,7 +1136,7 @@ function renderDocPreview() {
           <td><span class="field-placeholder ${improve?'filled':''}">${improve || '待填写'}</span></td></tr>
       </table>
       <p style="font-size:10px;color:var(--text-muted);margin-top:16px;text-align:center;">
-        HTML 预览 · 生成 Word 文档格式与模板 100% 一致
+        HTML 预览 · 生成 Word 文档格式与模板一致
       </p>
     </div>`;
 }
@@ -1184,19 +1166,18 @@ function escapeHtml(text) {
 // ── Init ──
 window.addEventListener('load', () => {
   appendMessage('assistant',
-    '您好！我是高校教务办公数字员工。\n\n' +
-    '我可以帮您自动生成教务报告文档，格式与模板 100% 一致。\n\n' +
-    '您可以：\n' +
-    '· 点击下方「完全自动填写」一键启动\n' +
-    '· 点击「知识文件上传」让我自动提取信息\n' +
-    '· 或直接输入消息开始对话'
+    '您好，请选择操作方式：\n\n' +
+    '· 点击下方「内置模板」选择预设模板\n' +
+    '· 点击「上传模板」上传Word文档自动识别\n' +
+    '· 点击「知识文件上传」提取文件信息\n' +
+    '· 或直接输入消息开始'
   );
   updateStepBar();
 });
 
 // Pulse animation for upload btn highlight
 const style = document.createElement('style');
-style.textContent = '@keyframes pulse { 0%,100%{transform:scale(1);box-shadow:var(--shadow)} 50%{transform:scale(1.04);box-shadow:0 0 0 6px rgba(79,70,229,0.12)} }';
+style.textContent = '@keyframes pulse { 0%,100%{transform:scale(1);box-shadow:var(--shadow)} 50%{transform:scale(1.03);box-shadow:0 0 0 4px rgba(37,99,235,0.1)} }';
 document.head.appendChild(style);
 </script>
 </body>
