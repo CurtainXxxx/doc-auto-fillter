@@ -1340,25 +1340,11 @@ function printDoc() {
   // 优先用 LibreOffice 转 PDF 打印，保留原格式
   if (currentDocxPath) {
     const url = `${BASE_URL}/convert-pdf?file_path=${encodeURIComponent(currentDocxPath)}`;
-    const printWin = window.open('', '_blank', 'width=900,height=700');
-    printWin.document.write(`<!DOCTYPE html><html><head><title>打印预览</title>
-      <style>body{margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#f5f5f5;}
-      .loading{font-size:16px;color:#666;}</style></head>
-      <body><div class="loading">正在转换文档，请稍候...</div></body></html>`);
-    printWin.document.close();
-    fetch(url).then(r => {
-      if (!r.ok) throw new Error('转换失败');
-      return r.blob();
-    }).then(blob => {
-      const pdfUrl = URL.createObjectURL(blob);
-      printWin.location.href = pdfUrl;
-      // PDF 加载后自动打印
-      printWin.onload = () => { setTimeout(() => { printWin.print(); }, 1000); };
-    }).catch(err => {
-      console.warn('PDF转换失败，回退HTML打印:', err);
-      printWin.close();
-      _printDocFallback();
-    });
+    // 直接在新标签页打开 PDF，由浏览器 PDF 查看器处理打印
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.click();
   } else {
     _printDocFallback();
   }
