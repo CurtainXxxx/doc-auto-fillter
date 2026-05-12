@@ -1131,6 +1131,11 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         )
         url = storage.generate_presigned_url(key=file_key, expire_time=86400)
         
+        # 保存本地副本供打印转PDF使用
+        local_path = os.path.join("/tmp", os.path.basename(file_name))
+        with open(local_path, "wb") as lf:
+            lf.write(docx_bytes)
+
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         
@@ -1139,6 +1144,7 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
             "message": "报告已成功生成并上传",
             "file_name": file_name,
             "download_url": url,
+            "local_path": local_path,
             "filled_data": filled_data,
         }, ensure_ascii=False)
         
@@ -1276,6 +1282,11 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         )
         url = storage.generate_presigned_url(key=file_key, expire_time=86400)
         
+        # 保存本地副本供打印转PDF使用
+        local_path = os.path.join("/tmp", os.path.basename(file_name))
+        with open(local_path, "wb") as lf:
+            lf.write(doc_bytes)
+
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         
@@ -1284,6 +1295,7 @@ def generate_from_template(file_path: str, report_data: str) -> str:
             "message": "文档已成功生成并上传",
             "file_name": file_key,
             "download_url": url,
+            "local_path": local_path,
             "filled_data": filled_data,
         }, ensure_ascii=False)
         

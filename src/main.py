@@ -623,6 +623,34 @@ async def template_preview(path: str = ""):
         return JSONResponse(content={"success": False, "message": f"预览生成失败: {e}"})
 
 
+@app.get(path="/convert-pdf")
+async def http_convert_pdf(file_path: str = ""):
+    """将 docx 转为 PDF（用 LibreOffice），保留原格式"""
+    import subprocess
+    if not file_path:
+        return JSONResponse(content={"success": False, "message": "缺少 file_path"})
+    workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    full_path = file_path if os.path.isabs(file_path) else os.path.join(workspace, file_path)
+    if not os.path.isfile(full_path):
+        return JSONResponse(content={"success": False, "message": f"文件不存在: {file_path}"})
+    try:
+        out_dir = "/tmp/pdf_output"
+        os.makedirs(out_dir, exist_ok=True)
+        result = subprocess.run(
+            ["libreoffice", "--headless", "--convert-to", "pdf", "--outdir", out_dir, full_path],
+            capture_output=True, text=True, timeout=60
+        )
+        if result.returncode != 0:
+            return JSONResponse(content={"success": False, "message": f"转换失败: {result.stderr}"})
+        pdf_name = os.path.splitext(os.path.basename(full_path))[0] + ".pdf"
+        pdf_path = os.path.join(out_dir, pdf_name)
+        if not os.path.isfile(pdf_path):
+            return JSONResponse(content={"success": False, "message": "PDF 文件未生成"})
+        return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_name)
+    except Exception as e:
+        return JSONResponse(content={"success": False, "message": f"转换出错: {e}"})
+
+
 @app.get(path="/graph_parameter")
 async def http_graph_inout_parameter(request: Request):
     return service.graph_inout_schema()
