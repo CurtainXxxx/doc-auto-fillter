@@ -320,6 +320,8 @@ html, body {
 .preview-header .actions button:hover { border-color: var(--primary-light); color: var(--primary); }
 .preview-header .actions button.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .preview-header .actions button.primary:hover { background: var(--primary-light); }
+.preview-header .actions .print-btn { color: #555; border-color: #ddd; }
+.preview-header .actions .print-btn:hover { border-color: #999; color: #333; }
 
 .preview-body {
   flex: 1; overflow: auto;
@@ -610,6 +612,7 @@ html, body {
       </div>
       <div class="actions" id="previewActions" style="display:none;">
         <button onclick="downloadDoc()">下载</button>
+        <button onclick="printDoc()" class="print-btn">打印</button>
       </div>
     </div>
     <div class="preview-body" id="previewBody">
@@ -1277,6 +1280,30 @@ function downloadDoc() {
     a.click();
     document.body.removeChild(a);
   }
+}
+
+function printDoc() {
+  const previewBody = document.getElementById('previewBody');
+  if (!previewBody || !previewBody.querySelector('.doc-page')) {
+    return;
+  }
+  const printWin = window.open('', '_blank', 'width=900,height=700');
+  printWin.document.write(`<!DOCTYPE html><html><head><title>打印预览</title>
+    <style>
+      body { margin: 20px; font-family: SimSun, serif; color: #000; }
+      table { border-collapse: collapse; width: 100%; }
+      td, th { border: 1px solid #000; padding: 4px 8px; font-size: 12px; vertical-align: middle; }
+      .label-cell { font-weight: bold; background: #f5f5f5; }
+      .value-cell { min-width: 40px; }
+      .value-cell.filled { color: #000; }
+      .value-cell.empty { color: #999; font-style: italic; }
+      p { margin: 8px 0; font-size: 14px; }
+      @media print { body { margin: 0; } }
+    </style></head><body>
+    ${previewBody.innerHTML}
+    <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`);
+  printWin.document.close();
 }
 
 // ── Submit manually edited fields to agent ──
