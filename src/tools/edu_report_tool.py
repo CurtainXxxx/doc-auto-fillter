@@ -1131,11 +1131,15 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         )
         url = storage.generate_presigned_url(key=file_key, expire_time=86400)
         
+        # 提取非空字段数据供前端更新预览
+        filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
+        
         return json.dumps({
             "success": True,
             "message": "报告已成功生成并上传",
             "file_name": file_name,
             "download_url": url,
+            "filled_data": filled_data,
         }, ensure_ascii=False)
         
     except Exception as e:
@@ -1272,11 +1276,15 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         )
         url = storage.generate_presigned_url(key=file_key, expire_time=86400)
         
+        # 提取非空字段数据供前端更新预览
+        filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
+        
         return json.dumps({
             "success": True,
             "message": "文档已成功生成并上传",
             "file_name": file_key,
             "download_url": url,
+            "filled_data": filled_data,
         }, ensure_ascii=False)
         
     except Exception as e:

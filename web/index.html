@@ -770,13 +770,28 @@ async function callAgent(userText) {
         try {
           const json = JSON.parse(data);
           const delta = json.choices?.[0]?.delta;
-          if (delta?.content && delta.role !== 'tool') {
+          if (!delta) continue;
+
+          if (delta.role === 'tool' && delta.content) {
+            // 解析工具结果，提取 filled_data 更新预览
+            try {
+              const toolResult = JSON.parse(delta.content);
+              if (toolResult.filled_data && typeof toolResult.filled_data === 'object') {
+                applyFilledData(toolResult.filled_data);
+              }
+            } catch(e) {}
+            continue;
+          }
+
+          if (delta.content) {
             fullText += delta.content;
-            bubble.innerHTML = renderMarkdown(fullText);
+            // 渲染时隐藏 [FIELDS]...[/FIELDS] 块
+            const displayText = fullText.replace(/\[FIELDS\][\s\S]*?\[\/FIELDS\]/g, '').trim();
+            bubble.innerHTML = renderMarkdown(displayText);
             document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
 
             // 实时检测字段值并更新预览
-            if (fullText.length - lastFieldCheckLen > 50) {
+            if (fullText.length - lastFieldCheckLen > 30) {
               lastFieldCheckLen = fullText.length;
               detectAndUpdateFields(fullText);
             }
@@ -798,16 +813,39 @@ async function callAgent(userText) {
   }
 }
 
+// ── Apply filled_data from tool result to document preview ──
+function applyFilledData(filledData) {
+  if (!filledData || typeof filledData !== 'object') return;
+  for (const [label, value] of Object.entries(filledData)) {
+    if (value && String(value).trim()) {
+      updateFieldByLabel(label, String(value));
+    }
+  }
+}
+
 // ── Detect field values from agent text & update document preview ──
 function detectAndUpdateFields(text) {
-  // 去掉 markdown 加粗标记
-  const clean = text.replace(/\*\*/g, '');
+  // 1. 优先解析 [FIELDS]...[/FIELDS] 格式（Agent 回显）
+  const fieldsBlock = text.match(/\[FIELDS\]([\s\S]*?)\[\/FIELDS\]/);
+  if (fieldsBlock) {
+    const lines = fieldsBlock[1].split('\n');
+    for (const line of lines) {
+      const eqIdx = line.indexOf('=');
+      if (eqIdx > 0) {
+        const key = line.substring(0, eqIdx).trim();
+        const val = line.substring(eqIdx + 1).trim();
+        if (key && val) {
+          updateFieldByLabel(key, val);
+        }
+      }
+    }
+  }
 
-  // 匹配多种格式：
-  // 1. "字段：值" 或 "字段: 值"
-  // 2. "- 字段：值" 或 "· 字段：值"
-  // 3. "1. 字段：值" 数字编号
-  // 4. "**字段**：值"
+  // 2. 去掉 markdown 加粗标记
+  const clean = text.replace(/\*\*/g, '').replace(/\[FIELDS\][\s\S]*?\[\/FIELDS\]/g, '');
+
+  // 3. 匹配多种格式：
+  // "字段：值" 或 "字段: 值" 或 "- 字段：值" 或 "1. 字段：值"
   const kvMatches = clean.matchAll(/(?:^|\n|[-–·•]\s*|\d+[.、)\]]\s*)([^\n：:]{1,30})[：:]\s*([^\n]+)/g);
   for (const m of kvMatches) {
     const key = m[1].trim().replace(/^[\s\-–·•\d.、)\]]+/,'').trim();
@@ -817,7 +855,7 @@ function detectAndUpdateFields(text) {
     }
   }
 
-  // 匹配"已收集/已填写"汇总格式：如 "课程名称=高等数学, 开课时间=2024-2025-1"
+  // 4. 匹配 key=value 格式
   const eqMatches = clean.matchAll(/(\S{2,15})\s*[=＝]\s*([^,，\n]+)/g);
   for (const m of eqMatches) {
     const key = m[1].trim();
@@ -1372,7 +1410,8 @@ document.addEventListener('input', function(e) {
 
 // ── Markdown Render ──
 function renderMarkdown(text) {
-  let html = escapeHtml(text);
+  // Strip [FIELDS]...[/FIELDS] blocks from display
+  let html = escapeHtml(text.replace(/\[FIELDS\][\s\S]*?\[\/FIELDS\]/g, ''));
   html = html.replace(/\[([^\]]*)\]\((https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)\)/g,
     '<a class="download-link" href="$2" target="_blank">下载文档</a>');
   html = html.replace(/(?<!href=")(https?:\/\/[^\s"<>]+\.docx[^\s"<>]*)/g,
