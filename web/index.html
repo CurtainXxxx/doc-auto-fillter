@@ -458,10 +458,18 @@ html, body {
   margin-bottom: 14px;
   display: flex; align-items: center; gap: 10px;
 }
-.fill-progress .bar-track {
-  flex: 1; height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden;
+#headerProgress {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
-.fill-progress .bar-fill {
+#headerProgress .bar-track {
+  width: 80px; height: 5px; background: #E5E7EB; border-radius: 3px; overflow: hidden;
+}
+#headerProgress .bar-fill {
   height: 100%; background: var(--success); border-radius: 3px; transition: width 0.3s;
 }
 .fill-progress .bar-text { font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
@@ -509,15 +517,15 @@ html, body {
 }
 .doc-done-card .dl-btn:hover { background: var(--primary-light); }
 .download-banner {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 14px; margin-bottom: 8px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
   background: var(--success-bg); border-radius: var(--radius-sm);
-  font-size: 13px; color: var(--success); font-weight: 500;
+  font-size: 12px; color: var(--success); font-weight: 500;
 }
 .download-banner .dl-btn {
-  margin-left: auto; padding: 4px 12px; font-size: 13px;
+  padding: 2px 10px; font-size: 12px;
   background: var(--primary); color: #fff; border-radius: var(--radius-sm);
-  text-decoration: none; white-space: nowrap;
+  text-decoration: none; white-space: nowrap; cursor: pointer; border: none;
 }
 .download-banner .dl-btn:hover { background: var(--primary-light); }
 .doc-done-card .checks {
@@ -1064,15 +1072,14 @@ function renderDocPreview() {
   }
   const pct = totalFields > 0 ? Math.round(filledCount / totalFields * 100) : 0;
 
-  let html = `<div class="doc-page">`;
-
-  // Progress bar
-  if (totalFields > 0) {
-    html += `<div class="fill-progress">
-      <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
-      <span class="bar-text">${filledCount}/${totalFields} 已填写</span>
-    </div>`;
+  // 渲染顶部进度条
+  const headerProgress = document.getElementById('headerProgress');
+  if (headerProgress && totalFields > 0) {
+    headerProgress.innerHTML = `<div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div><span class="bar-text">${filledCount}/${totalFields} 已填写</span>`;
+    headerProgress.style.display = 'flex';
   }
+
+  let html = `<div class="doc-page">`;
 
   // Document HTML
   html += docPreviewHtml;
@@ -1093,8 +1100,8 @@ function refreshProgressBar() {
     if (fieldData[fid] && fieldData[fid].trim()) filledCount++;
   }
   const pct = totalFields > 0 ? Math.round(filledCount / totalFields * 100) : 0;
-  const barFill = document.querySelector('.bar-fill');
-  const barText = document.querySelector('.bar-text');
+  const barFill = document.querySelector('#headerProgress .bar-fill');
+  const barText = document.querySelector('#headerProgress .bar-text');
   if (barFill) barFill.style.width = pct + '%';
   if (barText) barText.textContent = `${filledCount}/${totalFields} 已填写`;
 }
@@ -1156,15 +1163,20 @@ function updatePreview(state) {
     case 'done':
       title.textContent = '文档已生成';
       if (docPreviewHtml && currentDownloadUrl) {
-        // 保留文档预览，在顶部添加下载提示条
+        // 保留文档预览，下载提示放在工具栏
         const body = document.getElementById('previewBody');
-        const oldHtml = body.innerHTML;
-        body.innerHTML = `<div class="download-banner">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><path d="M5 13l4 4L19 7"/></svg>
-          <span>文档生成完成</span>
-          <button onclick="downloadDoc()" class="dl-btn" style="padding:4px 12px;font-size:13px;cursor:pointer;border:none;">下载Word文档</button>
-        </div>` + oldHtml.replace(/<div class="download-banner">[\s\S]*?<\/div>\s*/g, '');
-        document.getElementById('previewActions').style.display = 'flex';
+        // 移除可能残留的旧 download-banner
+        body.querySelectorAll('.download-banner').forEach(el => el.remove());
+        const actions = document.getElementById('previewActions');
+        actions.innerHTML = `
+          <div class="download-banner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;flex-shrink:0;"><path d="M5 13l4 4L19 7"/></svg>
+            <span>已完成</span>
+            <button onclick="downloadDoc()" class="dl-btn">下载Word</button>
+          </div>
+          <button onclick="printDoc()" class="print-btn">打印</button>
+        `;
+        actions.style.display = 'flex';
       } else if (currentDownloadUrl) {
         body.innerHTML = `
           <div class="doc-done-card">

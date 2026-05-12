@@ -51,7 +51,29 @@ def _strip_reasoning(msg):
 def _windowed_messages(old, new):
     """滑动窗口: 只保留最近 MAX_MESSAGES 条消息，并清理 reasoning_content"""
     merged = add_messages(old, new)[-MAX_MESSAGES:]  # type: ignore
-    return [_strip_reasoning(m) for m in merged]
+    merged = [_strip_reasoning(m) for m in merged]
+    # 修复滑动窗口裁剪后 ToolMessage 无对应 tool_calls 的问题
+    merged = _fix_orphan_tool_messages(merged)
+    return merged
+
+
+def _fix_orphan_tool_messages(messages):
+    """删除没有对应 AIMessage.tool_calls 的 ToolMessage，防止 API 400 错误"""
+    # 收集所有有效的 tool_call_id
+    valid_tool_call_ids = set()
+    for m in messages:
+        if isinstance(m, AIMessage) and hasattr(m, "tool_calls") and m.tool_calls:
+            for tc in m.tool_calls:
+                if "id" in tc:
+                    valid_tool_call_ids.add(tc["id"])
+    # 过滤掉孤立的 ToolMessage
+    result = []
+    for m in messages:
+        if isinstance(m, ToolMessage):
+            if m.tool_call_id not in valid_tool_call_ids:
+                continue  # 跳过孤立的 ToolMessage
+        result.append(m)
+    return result
 
 
 class AgentState(MessagesState):
@@ -68,6 +90,22 @@ def handle_tool_errors(request, handler):
             content=f"工具执行出错: ({str(e)})",
             tool_call_id=request.tool_call["id"]
         )
+
+
+@wrap_tool_call
+def sanitize_before_llm(request, handler):
+    """发送给LLM前清理孤立ToolMessage，防止400错误"""
+    if hasattr(request, 'messages') and request.messages:
+        valid_ids = set()
+        for m in request.messages:
+            for tc in (getattr(m, "tool_calls", None) or []):
+                valid_ids.add(tc.get("id"))
+        request.messages = [
+            m for m in request.messages
+            if getattr(m, "type", "") != "tool"
+            or (getattr(m, "tool_call_id", None) in valid_ids)
+        ]
+    return handler(request)
 
 
 def build_agent(ctx=None):
@@ -116,5 +154,5 @@ def build_agent(ctx=None):
                parse_knowledge_file, analyze_uploaded_template, generate_from_template],
         checkpointer=get_memory_saver(),
         state_schema=AgentState,
-        middleware=[handle_tool_errors],
+        middleware=[handle_tool_errors, sanitize_before_llm],
     )
