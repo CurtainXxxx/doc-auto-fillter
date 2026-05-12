@@ -1325,6 +1325,24 @@ function printDoc() {
   if (!previewBody || !previewBody.querySelector('.doc-page')) {
     return;
   }
+  // 只提取文档内容，排除所有 UI 元素（下载条、进度条、提交按钮等）
+  const docPages = previewBody.querySelectorAll('.doc-page');
+  let docHtml = '';
+  docPages.forEach(page => {
+    // 克隆节点，清理交互样式
+    const clone = page.cloneNode(true);
+    // 移除提交按钮
+    clone.querySelectorAll('#submitManualBtn, .submit-manual-btn').forEach(el => el.remove());
+    // 移除所有 contenteditable 属性
+    clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+    // 移除 placeholder 样式的空内容
+    clone.querySelectorAll('.placeholder-text').forEach(el => {
+      if (!el.textContent.trim() || el.textContent.trim() === '—') {
+        el.textContent = '';
+      }
+    });
+    docHtml += clone.outerHTML;
+  });
   const printWin = window.open('', '_blank', 'width=900,height=700');
   printWin.document.write(`<!DOCTYPE html><html><head><title>打印预览</title>
     <style>
@@ -1334,11 +1352,16 @@ function printDoc() {
       .label-cell { font-weight: bold; background: #f5f5f5; }
       .value-cell { min-width: 40px; }
       .value-cell.filled { color: #000; }
-      .value-cell.empty { color: #999; font-style: italic; }
+      .value-cell.empty { color: #ccc; }
       p { margin: 8px 0; font-size: 14px; }
+      /* 隐藏所有交互元素 */
+      .download-banner, .progress-bar, .submit-manual-btn, #submitManualBtn,
+      button, .actions { display: none !important; }
+      /* 去掉可编辑区域的边框和背景 */
+      [data-field-id] { border: none !important; background: none !important; outline: none !important; }
       @media print { body { margin: 0; } }
     </style></head><body>
-    ${previewBody.innerHTML}
+    ${docHtml}
     <script>window.onload=function(){window.print();}<\/script>
   </body></html>`);
   printWin.document.close();
