@@ -16,7 +16,7 @@ import cozeloop
 import uvicorn
 import time
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.runnables import RunnableConfig
@@ -629,8 +629,9 @@ async def http_convert_pdf(file_path: str = ""):
     import subprocess
     if not file_path:
         return JSONResponse(content={"success": False, "message": "缺少 file_path"})
-    workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
-    full_path = file_path if os.path.isabs(file_path) else os.path.join(workspace, file_path)
+    # 支持模板名解析（如"试卷分析"）
+    from tools.docx_preview import _resolve_template_path
+    full_path = _resolve_template_path(file_path)
     if not os.path.isfile(full_path):
         return JSONResponse(content={"success": False, "message": f"文件不存在: {file_path}"})
     try:

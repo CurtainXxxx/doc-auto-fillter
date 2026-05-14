@@ -1338,8 +1338,13 @@ function downloadDoc() {
 
 function printDoc() {
   // 优先用 LibreOffice 转 PDF 打印，保留原格式
-  if (currentDocxPath) {
-    const url = `${BASE_URL}/convert-pdf?file_path=${encodeURIComponent(currentDocxPath)}`;
+  let filePath = currentDocxPath || '';
+  // 如果还没生成文档，但有模板预览，则用模板文件转 PDF
+  if (!filePath && currentTemplatePath) {
+    filePath = currentTemplatePath;
+  }
+  if (filePath) {
+    const url = `${BASE_URL}/convert-pdf?file_path=${encodeURIComponent(filePath)}`;
     // 直接在新标签页打开 PDF，由浏览器 PDF 查看器处理打印
     const link = document.createElement('a');
     link.href = url;

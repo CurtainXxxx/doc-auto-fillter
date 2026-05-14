@@ -34,6 +34,9 @@ _OPTION_WORDS = {'选修', '必修', '开卷', '闭卷', '试题库', '试卷库
 # 占位符文字（需要替换为实际值的格）
 _PLACEHOLDER_TEXTS = {'%', '…', '……', '...', '—', '--', '___', '□', '○'}
 
+# 日期占位符模式（年月日及其变体，含全角/半角空格）
+_DATE_PLACEHOLDER_RE = re.compile(r'^[年]\s*[月]\s*[日]?\s*$|^[年][\s　]*[月][\s　]*[日]?\s*$')
+
 # 章节标题行标签（这些行不包含待填字段，只是标题）
 _SECTION_TITLE_LABELS = {'试卷分析', '试　卷　分　析', '课程目标与试卷题目的对应关系'}
 
@@ -146,13 +149,20 @@ def _is_label_cell(cell) -> bool:
     header_words = {'试题', '题号', '分数', '得分', '评卷人', '项目', '内容', '签名', '日期'}
     if text in header_words:
         return False
+    # 日期占位符不算标签
+    if _DATE_PLACEHOLDER_RE.match(text):
+        return False
     return True
 
 
 def _is_placeholder_cell(cell) -> bool:
-    """判断单元格是否是占位符格（如%、……等）"""
+    """判断单元格是否是占位符格（如%、……、年月日等）"""
     text = cell.text.strip()
-    return text in _PLACEHOLDER_TEXTS
+    if text in _PLACEHOLDER_TEXTS:
+        return True
+    if _DATE_PLACEHOLDER_RE.match(text):
+        return True
+    return False
 
 
 def _is_vmerge_continue(cell) -> bool:
@@ -326,6 +336,11 @@ def analyze_template(template_path: str) -> dict:
                                 break
                 i += 1
 
+            # ── 2.4 扫描独立占位符行（如"年　月　日"） ──
+            # 当一行的所有非合并单元格都是占位符，没有标签格
+            # 给它们友好的标签名
+            _scan_standalone_placeholder_row(unique, t_idx, r_idx, label_fields)
+
         # ── 2.5 扫描"表头+数据行"模式（多列数据行） ──
         # 处理试卷分析中的"题型百分比"、"分数段人数/比例"等区域
         # 这些区域特征：表头行有多个标签，下一行有空白格或占位符格待填
@@ -411,6 +426,51 @@ def analyze_template(template_path: str) -> dict:
     
     deduped_fields = [f for f in deduped_fields if not _fully_in_row_group(f)]
 
+    # ── 5.6 消除占位符行与冒号模式/多列模式的冲突 ──
+    # 场景：R17有"任课教师签字："（colon模式，空值），R18有"年月日"（standalone_placeholder+multi_col）
+    # 策略1：同一行有standalone_placeholder和multi_col时，保留multi_col（有更具体的标签）
+    # 策略2：colon字段空值且下一行有multi_col覆盖同位置时，移除colon字段（multi_col才是真正的填写目标）
+    
+    # 策略1：按行分组，如果某行同时有standalone_placeholder和multi_col，去掉standalone_placeholder
+    from collections import defaultdict
+    row_fields = defaultdict(list)
+    for f in deduped_fields:
+        for ri in f["row_indices"]:
+            row_fields[(f["table_idx"], ri)].append(f)
+    
+    standalone_to_remove = set()
+    for (t, r), fields_in_row in row_fields.items():
+        has_multi_col = any(f["pattern"] == "multi_col" for f in fields_in_row)
+        has_standalone = any(f["pattern"] == "standalone_placeholder" for f in fields_in_row)
+        if has_multi_col and has_standalone:
+            for f in fields_in_row:
+                if f["pattern"] == "standalone_placeholder":
+                    standalone_to_remove.add(id(f))
+    
+    deduped_fields = [f for f in deduped_fields if id(f) not in standalone_to_remove]
+    
+    # 策略2：colon字段空值 + 下一行有multi_col覆盖 → 移除colon字段
+    # 重新按行分组
+    row_fields2 = defaultdict(list)
+    for f in deduped_fields:
+        for ri in f["row_indices"]:
+            row_fields2[(f["table_idx"], ri)].append(f)
+    
+    colon_to_remove = set()
+    for f in deduped_fields:
+        if f["pattern"] == "colon" and not f.get("existing_value"):
+            t = f["table_idx"]
+            r = f["row_idx"]
+            c = f["col_idx"]
+            # 检查下一行是否有multi_col在同列
+            next_row_fields = row_fields2.get((t, r + 1), [])
+            for nf in next_row_fields:
+                if nf["pattern"] == "multi_col" and nf["col_idx"] == c:
+                    colon_to_remove.add(id(f))
+                    break
+    
+    deduped_fields = [f for f in deduped_fields if id(f) not in colon_to_remove]
+
     # ── 6. 按表格和行号排序 ──
     deduped_fields.sort(key=lambda f: (f["table_idx"], min(f["row_indices"]), f["col_idx"]))
 
@@ -453,6 +513,53 @@ def analyze_template(template_path: str) -> dict:
     }
 
     return result
+
+
+def _get_placeholder_label(text: str) -> str | None:
+    """根据占位符文本返回友好标签名，如果不是占位符返回None"""
+    stripped = text.strip()
+    # 日期占位符
+    if _DATE_PLACEHOLDER_RE.match(stripped):
+        return "日期"
+    return None
+
+
+def _scan_standalone_placeholder_row(unique_cells, t_idx: int, r_idx: int, label_fields: list):
+    """扫描独立占位符行——整行都是占位符（如'年　月　日'），没有标签格"""
+    seen_elements = set()
+    for c_idx, cell in enumerate(unique_cells):
+        if _is_vmerge_continue(cell):
+            continue
+        # 去重：合并单元格指向同一XML元素
+        elem_id = id(cell._element)
+        if elem_id in seen_elements:
+            continue
+        seen_elements.add(elem_id)
+        text = cell.text.strip()
+        if not text:
+            continue
+        # 只处理占位符
+        friendly_label = _get_placeholder_label(text)
+        if not friendly_label:
+            continue
+        # 检查该格是否已在 label_fields 中（可能被前面的步骤识别了）
+        fid = f"T{t_idx}_R{r_idx}_C{c_idx}"
+        if any(f['field_id'] == fid for f in label_fields):
+            continue
+        # 添加为独立字段
+        label_fields.append({
+            "field_id": fid,
+            "table_idx": t_idx,
+            "row_idx": r_idx,
+            "col_idx": c_idx,
+            "label": friendly_label,
+            "description": f"请填写{friendly_label}",
+            "fill_mode": "set",
+            "pattern": "standalone_placeholder",
+            "existing_value": "",
+        })
+        # 只添加一次，不重复
+        break
 
 
 def _scan_table_data_sections(table, t_idx: int, label_fields: list):
