@@ -782,9 +782,12 @@ async function callAgent(userText) {
           if (!delta) continue;
 
           if (delta.role === 'tool' && delta.content) {
-            // 解析工具结果，提取 filled_data 和 local_path
+            // 解析工具结果，优先使用精确 field_id 回填，其次再用 label 回填
             try {
               const toolResult = JSON.parse(delta.content);
+              if (toolResult.filled_field_values && typeof toolResult.filled_field_values === 'object') {
+                applyPreciseFieldValues(toolResult.filled_field_values);
+              }
               if (toolResult.filled_data && typeof toolResult.filled_data === 'object') {
                 applyFilledData(toolResult.filled_data);
               }
@@ -825,7 +828,17 @@ async function callAgent(userText) {
   }
 }
 
-// ── Apply filled_data from tool result to document preview ──
+// ── Apply precise field_id -> value result from tool ──
+function applyPreciseFieldValues(fieldValues) {
+  if (!fieldValues || typeof fieldValues !== 'object') return;
+  for (const [fieldId, value] of Object.entries(fieldValues)) {
+    if (fieldMap[fieldId] && value && String(value).trim()) {
+      updateFieldById(fieldId, String(value));
+    }
+  }
+}
+
+// ── Apply label -> value result from tool (fallback) ──
 function applyFilledData(filledData) {
   if (!filledData || typeof filledData !== 'object') return;
   for (const [label, value] of Object.entries(filledData)) {
@@ -847,7 +860,11 @@ function detectAndUpdateFields(text) {
         const key = line.substring(0, eqIdx).trim();
         const val = line.substring(eqIdx + 1).trim();
         if (key && val) {
-          updateFieldByLabel(key, val);
+          if (fieldMap[key]) {
+            updateFieldById(key, val);
+          } else {
+            updateFieldByLabel(key, val);
+          }
         }
       }
     }
@@ -880,12 +897,21 @@ function detectAndUpdateFields(text) {
 
 // ── Update a field in the document preview by label name ──
 function updateFieldByLabel(label, value) {
+  const normalizedLabel = label.replace(/\s+/g, '');
+
   // 1. 精确匹配
   let fids = labelToFields[label];
+  if (!fids || fids.length === 0) {
+    for (const [key, ids] of Object.entries(labelToFields)) {
+      if (key.replace(/\s+/g, '') === normalizedLabel) {
+        fids = ids;
+        break;
+      }
+    }
+  }
   if (fids && fids.length > 0) {
     for (const fid of fids) {
-      fieldData[fid] = value;
-      updateCellInPreview(fid, value);
+      updateFieldById(fid, value);
     }
     return;
   }
@@ -915,23 +941,17 @@ function updateFieldByLabel(label, value) {
     for (let i = 0; i < subLabels.length; i++) {
       const val = i < values.length ? values[i].trim() : '';
       for (const fid of subLabels[i][1]) {
-        fieldData[fid] = val;
-        updateCellInPreview(fid, val);
+        updateFieldById(fid, val);
       }
     }
     return;
   }
+}
 
-  // 3. 部分匹配：label 包含在某个 key 中，或某个 key 包含 label
-  for (const [k, v] of Object.entries(labelToFields)) {
-    if (k.includes(label) || label.includes(k)) {
-      for (const fid of v) {
-        fieldData[fid] = value;
-        updateCellInPreview(fid, value);
-      }
-      return;
-    }
-  }
+// ── Update a field in the document preview by exact field_id ──
+function updateFieldById(fieldId, value) {
+  fieldData[fieldId] = value;
+  updateCellInPreview(fieldId, value);
 }
 
 // ── Update a cell in the document preview by field_id ──
@@ -947,20 +967,8 @@ function updateCellInPreview(fieldId, value) {
       el.textContent = value;
       el.classList.toggle('filled', !!value.trim());
     } else if (el.classList.contains('editable')) {
-      // 整格可编辑的 td —— 清除占位符再设置值
-      // 先移除 placeholder span（如果有）
-      const ph = el.querySelector('.placeholder');
-      if (ph) ph.remove();
-      // 保留现有 w:r 格式结构，只更新 w:t 文本
-      const wtEls = el.querySelectorAll('t');
-      if (wtEls.length > 0) {
-        // 有 w:t 元素（来自 docx HTML），更新第一个，清空其余
-        wtEls[0].textContent = value;
-        for (let i = 1; i < wtEls.length; i++) wtEls[i].textContent = '';
-      } else {
-        // 普通文本，直接设置
-        el.textContent = value;
-      }
+      // 整格可编辑的 td 直接更新可见文本，避免预览层二次猜测 Word 内部结构
+      el.textContent = value;
       el.classList.remove('empty');
       el.classList.toggle('filled', !!value.trim());
     }

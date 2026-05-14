@@ -79,52 +79,112 @@ def _is_vmerge_restart(cell) -> bool:
     return False
 
 
-def _set_tc_text(tc, text: str, rPr_source=None):
-    """替换 tc 元素中所有文本内容，保留原有格式。
+def _clone_rpr(rPr_source):
+    """复制 run 格式。"""
+    if rPr_source is None:
+        return None
+    if getattr(rPr_source, "tag", None) == qn("w:rPr"):
+        return copy.deepcopy(rPr_source)
+    src_rPr = rPr_source.find(qn("w:rPr"))
+    if src_rPr is not None:
+        return copy.deepcopy(src_rPr)
+    return None
 
-    策略：
-    1. 移除所有内容子元素（w:p、w:tbl 等），仅保留 w:tcPr（边框/宽度等属性）
-       - 同时移除嵌套表格（w:tbl），防止旧文本藏在内嵌表中
-    2. 对含图表（w:drawing / c:chart）的单元格，保留全部原有内容，仅插入新段落
-    3. 创建新段落写入文本，从 rPr_source 复制字体/字号等格式
-    """
-    # 检查单元格是否含有图表/绘图（需保护，不可删除）
-    has_drawing = (len(tc.findall('.//' + qn('w:drawing'))) > 0 or
-                   len(tc.findall('.//' + qn('c:chart'))) > 0)
 
-    if not has_drawing:
-        # 移除所有内容子元素，只保留 tcPr
-        to_remove = []
-        for child in tc:
-            tag = child.tag.split('}')[-1] if '}' in child.tag else child.tag
-            if tag != 'tcPr':
-                to_remove.append(child)
-        for child in to_remove:
-            tc.remove(child)
+def _get_first_run_rpr(paragraph):
+    """获取段落中第一个 run 的 rPr。"""
+    for run in paragraph.findall(qn("w:r")):
+        rPr = run.find(qn("w:rPr"))
+        if rPr is not None:
+            return rPr
+    return None
 
-    # 在开头插入新段落
-    p = tc.makeelement(qn('w:p'), {})
-    tc.insert(0, p)
 
-    # 创建 run
-    r = p.makeelement(qn('w:r'), {})
+def _ensure_run_text(run, text: str, rPr_source=None):
+    """尽量复用已有 run，只改文本，不破坏段落结构。"""
+    if run.find(qn("w:rPr")) is None:
+        cloned = _clone_rpr(rPr_source)
+        if cloned is not None:
+            run.insert(0, cloned)
 
-    # 从 rPr_source 复制格式（字体、字号等）
-    if rPr_source is not None:
-        if rPr_source.tag == qn('w:rPr'):
-            r.append(copy.deepcopy(rPr_source))
+    text_nodes = run.findall(qn("w:t"))
+    if not text_nodes:
+        t_elem = run.makeelement(qn("w:t"), {})
+        run.append(t_elem)
+        text_nodes = [t_elem]
+
+    text_nodes[0].text = text
+    text_nodes[0].set(qn("xml:space"), "preserve")
+    for extra_t in text_nodes[1:]:
+        extra_t.text = ""
+
+
+def _set_paragraph_text_preserve_runs(paragraph, text: str, rPr_source=None):
+    """尽量保留现有 paragraph/run 结构，只替换文本。"""
+    runs = paragraph.findall(qn("w:r"))
+    target_run = None
+    for run in runs:
+        if run.findall(qn("w:t")):
+            target_run = run
+            break
+
+    if target_run is None:
+        if runs:
+            target_run = runs[0]
         else:
-            src_rPr = rPr_source.find(qn('w:rPr'))
-            if src_rPr is not None:
-                r.append(copy.deepcopy(src_rPr))
+            target_run = paragraph.makeelement(qn("w:r"), {})
+            paragraph.append(target_run)
 
-    t_elem = r.makeelement(qn('w:t'), {})
-    t_elem.text = str(text)
-    t_elem.set(qn('xml:space'), 'preserve')
-    r.append(t_elem)
+    effective_rpr = _get_first_run_rpr(paragraph) or rPr_source
+    _ensure_run_text(target_run, text, effective_rpr)
 
-    # 将 run 添加到段落
-    p.append(r)
+    for run in runs:
+        if run is target_run:
+            continue
+        for t_elem in run.findall(qn("w:t")):
+            t_elem.text = ""
+
+
+def _append_paragraph_with_text(tc, text: str, rPr_source=None, pPr_source=None):
+    """在单元格末尾追加一个带文本的段落，并继承段落/字体格式。"""
+    paragraph = tc.makeelement(qn("w:p"), {})
+    if pPr_source is not None:
+        paragraph.append(copy.deepcopy(pPr_source))
+    run = paragraph.makeelement(qn("w:r"), {})
+    cloned = _clone_rpr(rPr_source)
+    if cloned is not None:
+        run.append(cloned)
+    t_elem = run.makeelement(qn("w:t"), {})
+    t_elem.text = text
+    t_elem.set(qn("xml:space"), "preserve")
+    run.append(t_elem)
+    paragraph.append(run)
+    tc.append(paragraph)
+    return paragraph
+
+
+def _set_tc_text(tc, text: str, rPr_source=None):
+    """替换 tc 元素中的文本，尽量保留原模板的段落/run结构。"""
+    paragraphs = tc.findall(qn("w:p"))
+    if not paragraphs:
+        _append_paragraph_with_text(tc, str(text), rPr_source=rPr_source)
+        return
+
+    lines = str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if not lines:
+        lines = [""]
+
+    first_ppr = paragraphs[0].find(qn("w:pPr"))
+    for idx, line in enumerate(lines):
+        if idx < len(paragraphs):
+            effective_rpr = _get_first_run_rpr(paragraphs[idx]) or rPr_source
+            _set_paragraph_text_preserve_runs(paragraphs[idx], line, effective_rpr)
+        else:
+            _append_paragraph_with_text(tc, line, rPr_source=rPr_source, pPr_source=first_ppr)
+
+    for paragraph in paragraphs[len(lines):]:
+        effective_rpr = _get_first_run_rpr(paragraph) or rPr_source
+        _set_paragraph_text_preserve_runs(paragraph, "", effective_rpr)
 
 
 def _set_cell_text(cell, text: str, rPr_source=None):
@@ -134,22 +194,40 @@ def _set_cell_text(cell, text: str, rPr_source=None):
 
 def _append_value_to_tc_after_label(tc, label: str, value: str):
     """在tc元素中，在label后追加value。"""
-    for p in tc.findall(qn("w:p")):
-        for r in p.findall(qn("w:r")):
-            for t in r.findall(qn("w:t")):
-                if t.text and label in t.text:
-                    t.text = t.text.replace(label, f"{label}{value}", 1)
-                    return True
-    # 如果没找到label，直接追加
+    for paragraph in tc.findall(qn("w:p")):
+        text_nodes = paragraph.findall(".//" + qn("w:t"))
+        para_text = "".join((t.text or "") for t in text_nodes)
+        if label in para_text:
+            effective_rpr = _get_first_run_rpr(paragraph)
+            replaced = para_text.replace(label, f"{label}{value}", 1)
+            _set_paragraph_text_preserve_runs(paragraph, replaced, effective_rpr)
+            return True
+
     paragraphs = tc.findall(qn("w:p"))
     if paragraphs:
-        r_elem = paragraphs[0].makeelement(qn("w:r"), {})
-        t_elem = r_elem.makeelement(qn("w:t"), {})
-        t_elem.text = value
-        r_elem.append(t_elem)
-        paragraphs[0].append(r_elem)
+        paragraph = paragraphs[0]
+        para_text = "".join((t.text or "") for t in paragraph.findall(".//" + qn("w:t")))
+        effective_rpr = _get_first_run_rpr(paragraph)
+        _set_paragraph_text_preserve_runs(paragraph, para_text + str(value), effective_rpr)
         return True
     return False
+
+
+def _build_field_id_value_map(label_fields, data):
+    """把已填数据映射为精确的 field_id -> value，供前端精确回填。"""
+    field_values = {}
+    for field in label_fields:
+        label = field["label"]
+        if label not in data:
+            continue
+        value = data[label]
+        if value is None:
+            continue
+        value_str = str(value).strip()
+        if not value_str:
+            continue
+        field_values[field["field_id"]] = value_str
+    return field_values
 
 
 def _add_table_row_after(table, after_row_idx):
@@ -848,7 +926,7 @@ def _expand_report_data(template_path: str, user_data: dict) -> dict:
 
 # ── 主生成函数 ──
 
-def _build_report_docx(template_path: str, user_data: dict) -> bytes:
+def _build_report_docx(template_path: str, user_data: dict):
     """根据模板和用户数据生成填充后的docx文件。"""
     analysis = analyze_template(template_path)
     doc = Document(template_path)
@@ -905,7 +983,7 @@ def _build_report_docx(template_path: str, user_data: dict) -> bytes:
     tmp.close()
     os.unlink(tmp.name)
     
-    return content
+    return content, analysis, expanded_data
 
 
 def _expand_generic_data(label_fields, user_data):
@@ -943,7 +1021,7 @@ def _expand_generic_data(label_fields, user_data):
     return expanded
 
 
-def _fill_custom_template(template_path: str, user_data: dict) -> bytes:
+def _fill_custom_template(template_path: str, user_data: dict):
     """通用模板纯填充：只向空白格/待填格写入文本，绝不改变文档格式。
     
     与 _build_report_docx 的区别：
@@ -1001,7 +1079,7 @@ def _fill_custom_template(template_path: str, user_data: dict) -> bytes:
     tmp.close()
     os.unlink(tmp.name)
     
-    return content
+    return content, analysis, expanded_data
 
 
 def _fill_multi_col_field(doc, field, value):
@@ -1106,7 +1184,7 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
             data = report_data
         
         # 生成文档
-        docx_bytes = _build_report_docx(path, data)
+        docx_bytes, analysis, expanded_data = _build_report_docx(path, data)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -1138,6 +1216,7 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
 
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
+        filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
         
         return json.dumps({
             "success": True,
@@ -1146,6 +1225,7 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
             "download_url": url,
             "local_path": local_path,
             "filled_data": filled_data,
+            "filled_field_values": filled_field_values,
         }, ensure_ascii=False)
         
     except Exception as e:
@@ -1257,7 +1337,7 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         data = json.loads(report_data)
         
         # 通用模板：直接填充，不调用expand（保留原格式）
-        doc_bytes = _fill_custom_template(full_path, data)
+        doc_bytes, analysis, expanded_data = _fill_custom_template(full_path, data)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -1289,6 +1369,7 @@ def generate_from_template(file_path: str, report_data: str) -> str:
 
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
+        filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
         
         return json.dumps({
             "success": True,
@@ -1297,6 +1378,7 @@ def generate_from_template(file_path: str, report_data: str) -> str:
             "download_url": url,
             "local_path": local_path,
             "filled_data": filled_data,
+            "filled_field_values": filled_field_values,
         }, ensure_ascii=False)
         
     except Exception as e:
