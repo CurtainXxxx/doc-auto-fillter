@@ -193,11 +193,32 @@ def _set_cell_text(cell, text: str, rPr_source=None):
 
 
 def _append_value_to_tc_after_label(tc, label: str, value: str):
-    """在tc元素中，在label后追加value。"""
+    """在tc元素中，在标签run后追加一个新的value run，保留标签run不变。
+
+    改进点：不再把标签和值合并到同一个run，而是在标签run之后
+    插入一个新的run来放置值，这样标签和值可以保持各自的格式。
+    """
     for paragraph in tc.findall(qn("w:p")):
         text_nodes = paragraph.findall(".//" + qn("w:t"))
         para_text = "".join((t.text or "") for t in text_nodes)
         if label in para_text:
+            # 找到包含标签文字的run
+            runs = paragraph.findall(qn("w:r"))
+            for run in runs:
+                run_text = "".join((t.text or "") for t in run.findall(qn("w:t")))
+                if label in run_text:
+                    # 在此run后面插入新run
+                    new_run = copy.deepcopy(run)
+                    # 新run只包含value
+                    for t_elem in new_run.findall(qn("w:t")):
+                        t_elem.text = value
+                        t_elem.set(qn("xml:space"), "preserve")
+                    # 如果label后面还有文字（如冒号后的空格），保留
+                    # 只清空新run中不需要的部分
+                    run.addnext(new_run)
+                    return True
+
+            # 如果没有找到包含完整label的run（跨run标签），回退到简单方式
             effective_rpr = _get_first_run_rpr(paragraph)
             replaced = para_text.replace(label, f"{label}{value}", 1)
             _set_paragraph_text_preserve_runs(paragraph, replaced, effective_rpr)
@@ -228,6 +249,60 @@ def _build_field_id_value_map(label_fields, data):
             continue
         field_values[field["field_id"]] = value_str
     return field_values
+
+
+def validate_doc(template_path: str, output_path: str) -> dict:
+    """对比模板和生成文档的结构完整性。
+
+    检查项:
+    1. 生成文件能否被 python-docx 正常打开
+    2. 表格数量是否一致
+    3. 每张表的行数是否一致
+    4. 每张表的列数是否一致
+
+    Returns:
+        {"valid": bool, "errors": [...], "warnings": [...]}
+        errors → 阻断性错误（不应返回下载链接）
+        warnings → 警告（可返回下载链接但需提示）
+    """
+    errors = []
+    warnings = []
+
+    # 1. 检查生成文件能否打开
+    try:
+        output_doc = Document(output_path)
+    except Exception as e:
+        return {"valid": False, "errors": [f"生成的文档无法打开: {e}"], "warnings": []}
+
+    try:
+        template_doc = Document(template_path)
+    except Exception as e:
+        warnings.append(f"模板文件无法打开，跳过结构对比: {e}")
+        return {"valid": True, "errors": [], "warnings": warnings}
+
+    # 2. 表格数量
+    t_tables = len(template_doc.tables)
+    o_tables = len(output_doc.tables)
+    if t_tables != o_tables:
+        errors.append(f"表格数量变化: 模板{t_tables}个, 生成{o_tables}个")
+
+    # 3 & 4. 每张表的行数和列数
+    for i in range(min(t_tables, o_tables)):
+        t_rows = len(template_doc.tables[i].rows)
+        o_rows = len(output_doc.tables[i].rows)
+        if t_rows != o_rows:
+            # 行数增加可能是行组填充（合法），减少则是有问题
+            if o_rows < t_rows:
+                errors.append(f"表格{i+1}行数减少: 模板{t_rows}行, 生成{o_rows}行")
+            else:
+                warnings.append(f"表格{i+1}行数增加: 模板{t_rows}行, 生成{o_rows}行（可能是行组填充）")
+
+        t_cols = len(template_doc.tables[i].columns)
+        o_cols = len(output_doc.tables[i].columns)
+        if t_cols != o_cols:
+            errors.append(f"表格{i+1}列数变化: 模板{t_cols}列, 生成{o_cols}列")
+
+    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
 def _add_table_row_after(table, after_row_idx):
@@ -1226,11 +1301,14 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         with open(local_path, "wb") as lf:
             lf.write(docx_bytes)
 
+        # 生成后文档校验
+        validation = validate_doc(path, local_path)
+
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
-        
-        return json.dumps({
+
+        result = {
             "success": True,
             "message": "报告已成功生成并上传",
             "file_name": file_name,
@@ -1238,7 +1316,14 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
             "local_path": local_path,
             "filled_data": filled_data,
             "filled_field_values": filled_field_values,
-        }, ensure_ascii=False)
+            "validation": validation,
+        }
+
+        # 如果校验发现硬伤，标记但不阻断（前端可提示用户）
+        if not validation["valid"]:
+            result["message"] = f"报告已生成，但存在结构问题: {'; '.join(validation['errors'])}"
+
+        return json.dumps(result, ensure_ascii=False)
         
     except Exception as e:
         return json.dumps({
@@ -1382,8 +1467,11 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
-        
-        return json.dumps({
+
+        # 生成后文档校验
+        validation = validate_doc(full_path, local_path)
+
+        result = {
             "success": True,
             "message": "文档已成功生成并上传",
             "file_name": file_key,
@@ -1391,7 +1479,13 @@ def generate_from_template(file_path: str, report_data: str) -> str:
             "local_path": local_path,
             "filled_data": filled_data,
             "filled_field_values": filled_field_values,
-        }, ensure_ascii=False)
+            "validation": validation,
+        }
+
+        if not validation["valid"]:
+            result["message"] = f"文档已生成，但存在结构问题: {'; '.join(validation['errors'])}"
+
+        return json.dumps(result, ensure_ascii=False)
         
     except Exception as e:
         return json.dumps({

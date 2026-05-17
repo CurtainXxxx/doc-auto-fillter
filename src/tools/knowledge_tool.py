@@ -433,3 +433,132 @@ def parse_knowledge_file(file_description: str, file_content: str, missing_field
     result["total_count"] = len(fields)
 
     return json.dumps(result, ensure_ascii=False)
+
+
+@tool
+def extract_facts(file_description: str, file_content: str) -> str:
+    """从知识文件中自由提取所有事实信息，不依赖模板字段。
+
+    与 parse_knowledge_file 不同，此工具不接收字段列表，而是让 LLM 
+    自由识别文件中的所有键值对、数据、结论等信息，输出一份"事实清单"。
+    后续由 Agent 根据模板字段做映射。
+
+    适用于：用户上传任意知识文件 + 任意模板的场景，两步分离提取和映射。
+
+    Args:
+        file_description: 文件描述（如文件名、类型等）
+        file_content: 文件的文本内容
+
+    Returns:
+        提取的事实清单 JSON 字符串
+    """
+    ctx = request_context.get() or new_context(method="extract_facts")
+
+    content = file_content[:12000]  # 允许更长，因为需要提取更多信息
+
+    system_prompt = """你是一个精确的信息提取助手。你的任务是从给定的文件内容中，提取所有可识别的事实信息。
+
+规则：
+1. 提取所有键值对形式的信息，如"课程名称：高等数学"→ {"课程名称": "高等数学"}
+2. 提取所有数值数据，如"平均分72.5"→ {"平均分": "72.5"}
+3. 提取所有表格中的数据，按语义命名
+4. 提取所有结论性文字（如课程总结、改进措施等大段文本），保留原文
+5. 字段命名使用中文，尽量使用文件中的原始表述
+6. 不要编造信息，只提取文件中明确存在的内容
+7. 如果同一信息有多种表述，选择最完整的
+8. 必须返回合法的JSON格式，所有值为字符串"""
+
+    user_prompt = f"""请从以下文件内容中提取所有事实信息：
+
+文件描述：{file_description}
+
+文件内容：
+{content}
+
+请返回JSON格式，例如：
+{{"课程名称": "高等数学", "学时数": "64", "教师姓名": "张明", "课程总结": "本课程...", "平均分": "72.5"}}
+
+只返回JSON，不要其他文字。"""
+
+    try:
+        ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
+        ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
+
+        if ext_api_key and ext_base_url:
+            from langchain_openai import ChatOpenAI
+            ext_model = os.getenv("EXTERNAL_LLM_MODEL", "deepseek-chat")
+            ext_llm = ChatOpenAI(
+                model=ext_model,
+                api_key=ext_api_key,
+                base_url=ext_base_url,
+                temperature=0.1,
+                max_tokens=4096,
+            )
+            from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
+            response = ext_llm.invoke([SM(content=system_prompt), HM(content=user_prompt)])
+            content_str = response.content
+        else:
+            client = LLMClient(ctx=ctx)
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ]
+            response = client.invoke(
+                messages=messages,
+                model="doubao-seed-1-6-lite-251015",
+                temperature=0.1,
+                max_completion_tokens=4096,
+            )
+            content_str = response.content
+            if isinstance(content_str, list):
+                content_str = " ".join(
+                    item.get("text", "") for item in content_str
+                    if isinstance(item, dict) and item.get("type") == "text"
+                )
+            elif not isinstance(content_str, str):
+                content_str = str(content_str)
+
+        # 确保 content_str 是字符串
+        if not isinstance(content_str, str):
+            content_str = str(content_str)
+
+        # 提取JSON
+        content_str = content_str.strip()
+        try:
+            facts = json.loads(content_str)
+        except json.JSONDecodeError:
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', content_str)
+            if json_match:
+                facts = json.loads(json_match.group(1).strip())
+            else:
+                brace_match = re.search(r'\{[\s\S]*\}', content_str)
+                if brace_match:
+                    facts = json.loads(brace_match.group(0))
+                else:
+                    facts = {}
+
+        # 清理：值必须是字符串且非空
+        clean_facts = {}
+        for k, v in facts.items():
+            val = str(v).strip() if v else ""
+            if val and val not in ("null", "None", "无", "未知", "-"):
+                clean_facts[k] = val
+
+        result = {
+            "file": file_description,
+            "fact_count": len(clean_facts),
+            "facts": clean_facts,
+            "summary": f"从文件中提取了 {len(clean_facts)} 条事实信息"
+        }
+
+        return json.dumps(result, ensure_ascii=False)
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"事实提取失败: {e}")
+        return json.dumps({
+            "file": file_description,
+            "fact_count": 0,
+            "facts": {},
+            "summary": f"事实提取失败: {e}"
+        }, ensure_ascii=False)
