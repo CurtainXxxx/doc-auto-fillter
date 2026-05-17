@@ -744,8 +744,10 @@ def _simplify_fields(label_fields):
         if g["type"] == "single":
             f = g["field"]
             user_fields.append({
-                "label": f["label"],
-                "description": f.get("description", f"请填写{f['label']}"),
+                "field_id": f["field_id"],
+                "label": f["field_id"],
+                "raw_label": f["label"],
+                "description": f"{f['label']} - 请填写{f['label']}",
                 "fill_mode": f["fill_mode"],
             })
         else:
@@ -766,25 +768,35 @@ def _simplify_fields(label_fields):
                               and not any(sf["label"].endswith(f"_{s}") for s in internal_suffixes)]
                 for sf in base_fields:
                     user_fields.append({
-                        "label": sf["label"],
-                        "description": sf.get("description", f"请填写{sf['label']}"),
+                        "field_id": sf["field_id"],
+                        "label": sf["field_id"],
+                        "raw_label": sf["label"],
+                        "description": f"{sf['label']} - 请填写{sf['label']}",
                         "fill_mode": sf["fill_mode"],
                     })
                 # 添加考勤组
                 att_labels = [s for s in subs if s in attendance_suffixes]
                 if att_labels:
+                    # 找出考勤子字段的 field_id
+                    att_fids = [sf["field_id"] for sf in g["sub_fields"] 
+                                if any(sf["label"].endswith(f"_{s}") for s in att_labels)]
+                    att_labels_with_fid = [f"[{fid}] {lbl}" for fid, lbl in zip(att_fids, att_labels)]
                     user_fields.append({
                         "label": "考勤数据",
                         "description": "请填写考勤数据：应到、实到、缺考、缓考、作弊、取消考试资格人数",
                         "fill_mode": "group",
-                        "sub_labels": att_labels,
+                        "sub_labels": att_fids,
+                        "sub_field_ids": att_fids,
                     })
             else:
+                # 提取子字段的 field_id
+                sub_fids = [sf["field_id"] for sf in g["sub_fields"]]
                 user_fields.append({
                     "label": base,
                     "description": f"请填写{base}的相关数据",
                     "fill_mode": "group",
-                    "sub_labels": subs,
+                    "sub_labels": sub_fids,
+                    "sub_field_ids": sub_fids,
                 })
     
     return user_fields
