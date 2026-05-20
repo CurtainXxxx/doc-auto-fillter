@@ -192,6 +192,37 @@ def _set_cell_text(cell, text: str, rPr_source=None):
     _set_tc_text(cell._element, text, rPr_source=rPr_source)
 
 
+def _replace_embedded_date_in_tc(tc, label: str, existing_value: str, value: str):
+    """在tc元素中，替换嵌入式日期占位符为实际值。
+    
+    例如：单元格文本 "考试时间  年  月  日  上午  下午"
+    label="考试时间", existing_value="年  月  日  上午  下午", value="2024年12月15日 上午"
+    结果: "考试时间  2024年12月15日 上午"
+    """
+    import re as _re
+    _EMBEDDED_DATE_PAT = _re.compile(r'年\s*月\s*日(?:\s*(?:上午|下午|上|下))?')
+    
+    for paragraph in tc.findall(qn("w:p")):
+        text_nodes = paragraph.findall(".//" + qn("w:t"))
+        para_text = "".join((t.text or "") for t in text_nodes)
+        
+        # 在段落文本中找到标签位置，然后替换标签后面的日期占位符
+        label_pos = para_text.find(label)
+        if label_pos >= 0:
+            after_label = para_text[label_pos + len(label):]
+            replaced = _EMBEDDED_DATE_PAT.sub(value, after_label, count=1)
+            new_para_text = para_text[:label_pos + len(label)] + replaced
+            
+            effective_rpr = _get_first_run_rpr(paragraph)
+            _set_paragraph_text_preserve_runs(paragraph, new_para_text, effective_rpr)
+            return True
+    
+    # 回退：直接设置整个单元格文本
+    rPr_source = _find_label_rPr_in_row(tc.getparent())
+    _set_tc_text(tc, f"{label} {value}", rPr_source=rPr_source)
+    return True
+
+
 def _append_value_to_tc_after_label(tc, label: str, value: str):
     """在tc元素中，在标签run后追加一个新的value run，保留标签run不变。
 
@@ -316,7 +347,7 @@ def _add_table_row_after(table, after_row_idx):
 
 # ── 选项词集合 ──
 _OPTION_WORDS_SET = frozenset({
-    "选修", "必修", "开卷", "闭卷", "是", "否",
+    "选修", "必修", "开卷", "闭卷", "半开卷", "是", "否",
     "试题库", "试卷库", "教师组题", "本人阅卷", "同行阅卷",
     "集体阅卷", "机器阅卷", "其他",
 })
@@ -324,10 +355,39 @@ _OPTION_WORDS_SET = frozenset({
 
 # ── 勾选框行检测和填充 ──
 
+def _normalize_option_text(text: str) -> str:
+    """标准化选项文字：去除多余空格，使'闭  卷'匹配'闭卷'。"""
+    return text.replace(" ", "").replace("　", "")
+
+
+def _find_section_title_above(table, row_idx: int) -> str:
+    """从上方行查找章节标题（如'二、考试方式'），用于无行标签的勾选框组。"""
+    for r in range(row_idx - 1, max(row_idx - 3, -1), -1):
+        row = table.rows[r]
+        seen = set()
+        for cell in row.cells:
+            elem_id = id(cell._element)
+            if elem_id not in seen:
+                seen.add(elem_id)
+                text = cell.text.strip()
+                # 检查是否是跨整行的章节标题（gridSpan较大）
+                from docx.oxml.ns import qn as _qn
+                tc = cell._tc
+                tcPr = tc.find(_qn("w:tcPr"))
+                if tcPr is not None:
+                    gs = tcPr.find(_qn("w:gridSpan"))
+                    if gs is not None:
+                        span = int(gs.get(_qn("w:val"), "1"))
+                        if span >= 5 and text:  # 跨5列以上视为章节标题
+                            return text
+    return ""
+
+
 def _detect_checkbox_row(unique_cells):
     """检测一行是否是勾选框行，返回标签组列表。
     
     勾选框行模式: [行标签] [选项1] [空白1] [选项2] [空白2] ... [行标签2] [选项3] [空白3] ...
+    也支持无行标签但有上方章节标题的模式。
     返回: [{"label": 行标签, "option_blanks": {选项文字: 空白格索引}}, ...]
     """
     groups = []
@@ -338,20 +398,31 @@ def _detect_checkbox_row(unique_cells):
         cell_text = unique_cells[ci].text.strip()
         next_text = unique_cells[ci + 1].text.strip()
         
-        if cell_text in _OPTION_WORDS_SET and not next_text:
+        # 标准化选项文字以匹配（处理"闭  卷" → "闭卷"的情况）
+        normalized_text = _normalize_option_text(cell_text)
+        
+        if (normalized_text in _OPTION_WORDS_SET or cell_text in _OPTION_WORDS_SET) and not next_text:
             # 找到选项+空白格对
-            current_options[cell_text] = ci + 1
-        elif cell_text and cell_text not in _OPTION_WORDS_SET and not _is_vmerge_continue(unique_cells[ci]):
+            # 优先使用原始文本（保留空格版）作为key，便于后续匹配
+            opt_key = normalized_text if normalized_text in _OPTION_WORDS_SET else cell_text
+            current_options[opt_key] = ci + 1
+        elif cell_text and normalized_text not in _OPTION_WORDS_SET and cell_text not in _OPTION_WORDS_SET and not _is_vmerge_continue(unique_cells[ci]):
             # 遇到非选项标签文字
             # 如果当前组已有选项，先保存
             if current_options and current_label:
                 groups.append({"label": current_label, "option_blanks": current_options})
+            elif current_options:
+                # 无行标签但有选项——使用空标签或从上方标题获取
+                groups.append({"label": current_label or "_checkbox_group", "option_blanks": current_options})
             current_label = cell_text
             current_options = {}
     
     # 保存最后一组
-    if current_options and current_label:
-        groups.append({"label": current_label, "option_blanks": current_options})
+    if current_options:
+        if current_label:
+            groups.append({"label": current_label, "option_blanks": current_options})
+        else:
+            groups.append({"label": "_checkbox_group", "option_blanks": current_options})
     
     return groups
 
@@ -404,6 +475,9 @@ def _find_label_rPr_in_row(tr):
 
 def _fill_label_fields(doc, label_fields, data):
     """填充标签字段，支持多种填充模式。保留原有格式。"""
+    import re as _re
+    _EMBEDDED_DATE_PAT = _re.compile(r'年\s*月\s*日(?:\s*(?:上午|下午|上|下))?')
+    
     for f in label_fields:
         label = f["label"]
         if label not in data:
@@ -411,6 +485,7 @@ def _fill_label_fields(doc, label_fields, data):
         value = data[label]
         fill_mode = f.get("fill_mode", "append")
         pattern = f.get("pattern", "colon")
+        existing_value = f.get("existing_value", "")
         
         for ri in f["row_indices"]:
             t_idx = f["table_idx"]
@@ -437,12 +512,18 @@ def _fill_label_fields(doc, label_fields, data):
                     _set_tc_text(tcs[col_idx], str(value), rPr_source=rPr_source)
             
             elif fill_mode == "append":
-                # 冒号模式：在标签后追加值
                 col_idx = f["col_idx"]
                 tr = table.rows[ri]._tr
                 tcs = tr.findall(qn("w:tc"))
                 if col_idx < len(tcs):
-                    _append_value_to_tc_after_label(tcs[col_idx], label, str(value))
+                    tc = tcs[col_idx]
+                    # 特殊处理：嵌入式日期占位符
+                    # 如果existing_value包含"年月日"等日期占位符，替换占位符而非追加
+                    if existing_value and _EMBEDDED_DATE_PAT.search(existing_value):
+                        _replace_embedded_date_in_tc(tc, label, existing_value, str(value))
+                    else:
+                        # 标准冒号模式：在标签后追加值
+                        _append_value_to_tc_after_label(tc, label, str(value))
 
 
 def _fill_checkbox_rows_in_table(doc, analysis, data):
@@ -472,11 +553,32 @@ def _fill_checkbox_rows_in_table(doc, analysis, data):
                             user_value = data[key]
                             break
                 
-                # 3. 检查选项本身是否在data中
+                # 3. 对_checkbox_group标签（无行标签），尝试从上方章节标题匹配
+                if user_value is None and row_label == "_checkbox_group":
+                    section_title = _find_section_title_above(table, ri)
+                    if section_title:
+                        clean_section = section_title.replace("\n", "").replace(" ", "")
+                        for key in data:
+                            clean_key = key.replace("\n", "").replace(" ", "")
+                            if clean_key == clean_section or clean_key in clean_section:
+                                user_value = data[key]
+                                break
+                
+                # 4. 检查选项本身是否在data中
                 if user_value is None:
                     for opt in group["option_blanks"]:
                         if opt in data:
                             user_value = data[opt]
+                            break
+                
+                # 5. 对_checkbox_group，也检查data中是否有该组任意选项的同义词
+                if user_value is None and row_label == "_checkbox_group":
+                    for opt in group["option_blanks"]:
+                        for key in data:
+                            if _normalize_option_text(key) == _normalize_option_text(opt):
+                                user_value = data[key]
+                                break
+                        if user_value is not None:
                             break
                 
                 if user_value is not None:
@@ -484,7 +586,12 @@ def _fill_checkbox_rows_in_table(doc, analysis, data):
 
 
 def _fill_simple_row_groups(doc, groups, data):
-    """填充简单行组（重复行数据）。"""
+    """填充简单行组（重复行数据）。
+    
+    Returns:
+        dict: field_id → value 映射，格式为 T{t}_G{g}_R{r}_C{c}
+    """
+    rg_field_values = {}
     for g in groups:
         gid = g["group_id"]
         if gid not in data:
@@ -494,9 +601,13 @@ def _fill_simple_row_groups(doc, groups, data):
         if not isinstance(row_data_list, list):
             continue
         
-        table = doc.tables[g["table_idx"]]
+        t_idx = g["table_idx"]
+        table = doc.tables[t_idx]
         start_row = g["start_row"]
         template_row_count = g["template_row_count"]
+        
+        # 从 group_id 提取 group 序号 (如 "T0_G1" → 1)
+        g_num = int(gid.split("_G")[1]) if "_G" in gid else 0
         
         # 填充模板行
         for row_offset, row_data in enumerate(row_data_list):
@@ -521,6 +632,9 @@ def _fill_simple_row_groups(doc, groups, data):
                         val = vm.get(qn("w:val"))
                         if val is None or val == "":
                             # vMerge=continue：消耗数据但不填值
+                            # 仍然记录映射
+                            fid = f"T{t_idx}_G{g_num}_R{row_offset}_C{data_idx}"
+                            rg_field_values[fid] = str(row_data[data_idx])
                             data_idx += 1
                             continue
                 
@@ -537,6 +651,8 @@ def _fill_simple_row_groups(doc, groups, data):
                 if not text or text in ("%", "…", "……"):
                     rPr_source = _find_label_rPr_in_row(tr)
                     _set_tc_text(tc, str(row_data[data_idx]), rPr_source=rPr_source)
+                    fid = f"T{t_idx}_G{g_num}_R{row_offset}_C{data_idx}"
+                    rg_field_values[fid] = str(row_data[data_idx])
                     data_idx += 1
                 else:
                     # 有文字的格：如果不是标签则跳过
@@ -563,6 +679,8 @@ def _fill_simple_row_groups(doc, groups, data):
                         if vm is not None:
                             val = vm.get(qn("w:val"))
                             if val is None or val == "":
+                                fid = f"T{t_idx}_G{g_num}_R{extra_idx}_C{data_idx}"
+                                rg_field_values[fid] = str(row_data[data_idx])
                                 data_idx += 1
                                 continue
                     all_text = []
@@ -574,7 +692,11 @@ def _fill_simple_row_groups(doc, groups, data):
                     text = "".join(all_text).strip()
                     if not text or text in ("%", "…", "……"):
                         _set_tc_text(tc, str(row_data[data_idx]))
+                        fid = f"T{t_idx}_G{g_num}_R{extra_idx}_C{data_idx}"
+                        rg_field_values[fid] = str(row_data[data_idx])
                         data_idx += 1
+    
+    return rg_field_values
 
 
 # ── 用户字段简化 ──
@@ -1040,10 +1162,15 @@ def _build_report_docx(template_path: str, user_data: dict):
                 for ci in g["option_blanks"].values():
                     checkbox_blank_cells.add((t_idx, r_idx, ci))
 
-    # 过滤掉勾选框空白格位置的label字段（避免重复填充冲突）
+    # 过滤掉勾选框字段（pattern=checkbox由_fill_checkbox_rows_in_table单独处理）
+    # 以及勾选框空白格位置的label字段（避免重复填充冲突）
     # 但保留勾选框行中非空白格位置的label字段（如"教师姓名"）
     filtered_fields = []
     for f in analysis["label_fields"]:
+        # 1. checkbox模式字段直接跳过
+        if f.get("pattern") == "checkbox":
+            continue
+        # 2. 勾选框空白格位置的字段跳过
         t_idx = f["table_idx"]
         skip = False
         for r_idx in f["row_indices"]:
@@ -1060,7 +1187,7 @@ def _build_report_docx(template_path: str, user_data: dict):
     _fill_checkbox_rows_in_table(doc, analysis, expanded_data)
     
     # 5. 填充行组
-    _fill_simple_row_groups(doc, analysis["row_groups"], expanded_data)
+    rg_field_values = _fill_simple_row_groups(doc, analysis["row_groups"], expanded_data)
     
     # 保存到临时文件
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
@@ -1070,7 +1197,7 @@ def _build_report_docx(template_path: str, user_data: dict):
     tmp.close()
     os.unlink(tmp.name)
     
-    return content, analysis, expanded_data
+    return content, analysis, expanded_data, rg_field_values
 
 
 def _expand_generic_data(label_fields, user_data):
@@ -1151,7 +1278,7 @@ def _fill_custom_template(template_path: str, user_data: dict):
     _fill_checkbox_rows_in_table(doc, analysis, expanded_data)
     
     # 4. 填充行组（使用展开后的数据）
-    _fill_simple_row_groups(doc, analysis["row_groups"], expanded_data)
+    rg_field_values = _fill_simple_row_groups(doc, analysis["row_groups"], expanded_data)
     
     # 5. 填充多列字段（multi_col字段，如评价报告中的课程目标表）
     for f in analysis["label_fields"]:
@@ -1166,7 +1293,7 @@ def _fill_custom_template(template_path: str, user_data: dict):
     tmp.close()
     os.unlink(tmp.name)
     
-    return content, analysis, expanded_data
+    return content, analysis, expanded_data, rg_field_values
 
 
 def _fill_multi_col_field(doc, field, value):
@@ -1271,7 +1398,7 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
             data = report_data
         
         # 生成文档
-        docx_bytes, analysis, expanded_data = _build_report_docx(path, data)
+        docx_bytes, analysis, expanded_data, rg_field_values = _build_report_docx(path, data)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -1307,6 +1434,7 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
+        filled_field_values.update(rg_field_values)  # 合并行组field_id映射
 
         result = {
             "success": True,
@@ -1434,7 +1562,7 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         data = json.loads(report_data)
         
         # 通用模板：直接填充，不调用expand（保留原格式）
-        doc_bytes, analysis, expanded_data = _fill_custom_template(full_path, data)
+        doc_bytes, analysis, expanded_data, rg_field_values = _fill_custom_template(full_path, data)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -1467,6 +1595,7 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
+        filled_field_values.update(rg_field_values)  # 合并行组field_id映射
 
         # 生成后文档校验
         validation = validate_doc(full_path, local_path)
