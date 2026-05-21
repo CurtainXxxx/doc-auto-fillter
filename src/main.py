@@ -646,6 +646,43 @@ async def generated_preview(local_path: str = ""):
         return JSONResponse(content={"success": False, "message": f"预览生成失败: {e}"})
 
 
+@app.get(path="/download-docx")
+async def http_download_docx(file_path: str = ""):
+    """代理下载 docx 文件（支持本地路径和远程URL）"""
+    if not file_path:
+        return JSONResponse(content={"success": False, "message": "缺少 file_path"})
+
+    # 如果是远程URL（对象存储），先下载到 /tmp 再返回
+    if file_path.startswith("http://") or file_path.startswith("https://"):
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+                resp = await client.get(file_path)
+                resp.raise_for_status()
+                # 从URL提取文件名
+                from urllib.parse import urlparse, unquote
+                url_path = unquote(urlparse(file_path).path)
+                fname = os.path.basename(url_path).split("?")[0]
+                if not fname.endswith(".docx"):
+                    fname = "document.docx"
+                tmp_path = os.path.join("/tmp", fname)
+                with open(tmp_path, "wb") as f:
+                    f.write(resp.content)
+                return FileResponse(tmp_path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=fname)
+        except Exception as e:
+            return JSONResponse(content={"success": False, "message": f"下载失败: {e}"})
+
+    # 本地文件路径
+    full_path = file_path
+    if not os.path.isabs(file_path):
+        from tools.docx_preview import _resolve_template_path
+        full_path = _resolve_template_path(file_path)
+    if not os.path.isfile(full_path):
+        return JSONResponse(content={"success": False, "message": f"文件不存在: {file_path}"})
+    fname = os.path.basename(full_path)
+    return FileResponse(full_path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename=fname)
+
+
 @app.get(path="/convert-pdf")
 async def http_convert_pdf(file_path: str = ""):
     """将 docx 转为 PDF（用 LibreOffice），保留原格式"""

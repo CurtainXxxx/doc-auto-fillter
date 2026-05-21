@@ -1421,12 +1421,22 @@ function highlightUploadBtn() {
 }
 
 function downloadDoc() {
-  if (currentDownloadUrl) {
+  // 优先使用后端代理下载（支持远程URL和本地文件）
+  if (currentDocxPath) {
+    const url = `${BASE_URL}/download-docx?file_path=${encodeURIComponent(currentDocxPath)}`;
     const a = document.createElement('a');
-    a.href = currentDownloadUrl;
+    a.href = url;
     a.download = '';
-    a.target = '_blank';
-    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+  if (currentDownloadUrl) {
+    const url = `${BASE_URL}/download-docx?file_path=${encodeURIComponent(currentDownloadUrl)}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1434,24 +1444,9 @@ function downloadDoc() {
 }
 
 function printDoc() {
-  // 优先用 LibreOffice 转 PDF 打印，保留原格式
-  let filePath = currentDocxPath || '';
-  // 如果还没生成文档，但有模板预览，则用模板文件转 PDF
-  if (!filePath && currentTemplatePath) {
-    filePath = currentTemplatePath;
-  }
-  if (filePath) {
-    const url = `${BASE_URL}/convert-pdf?file_path=${encodeURIComponent(filePath)}`;
-    // 直接在新标签页打开 PDF，由浏览器 PDF 查看器处理打印
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = '_blank';
-    link.click();
-  } else {
-    _printDocFallback();
-  }
+  // 直接使用 HTML 打印预览，调起系统打印对话框（用户可选打印机/格式）
+  _printDocFallback();
 }
-
 function _printDocFallback() {
   const previewBody = document.getElementById('previewBody');
   if (!previewBody || !previewBody.querySelector('.doc-page')) {
