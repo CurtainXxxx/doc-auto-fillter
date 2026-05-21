@@ -145,6 +145,16 @@ def _extract_labels_from_cell(cell) -> list[tuple[str, str]]:
             # 将日期占位符部分作为existing_value（表示需要替换/追加）
             remaining = line[len(label):].strip()
             results.append((label, remaining))
+            continue
+        
+        # 模式3：标签+填写说明 "主要教学经历（授课名称、起止时间...）"
+        # 括号内是填写指引，需要被替换为实际内容
+        hint_match = re.match(r'^(.+?)（[^）]{2,}）\s*$', line)
+        if hint_match:
+            label = hint_match.group(1).strip()
+            # 将整个文本作为existing_value（含说明），fill_mode=replace
+            results.append((label, line))
+            continue
 
     return results
 
@@ -218,6 +228,95 @@ def _get_grid_span(cell) -> int:
             if val:
                 return int(val)
     return 1
+
+
+def _scan_paragraph_underline_fields(doc) -> list:
+    """扫描文档正文段落中的下划线横线字段（如"教材名称______"）。
+    
+    这些字段不在表格中，而是文档正文段落里的"标签+下划线空白"格式。
+    
+    Returns:
+        list[dict]: 字段列表，每个字段包含:
+            - field_id: "P{paragraph_idx}"
+            - label: 标签文字
+            - pattern: "paragraph_underline"
+            - table_idx: -1 (不在表格中)
+            - row_idx: 段落索引
+            - col_idx: -1
+            - existing_value: "" (空白待填)
+            - fill_mode: "paragraph_underline"
+            - description: 描述文字
+            - row_indices: [段落索引]
+            - repeat_count: 1
+    """
+    fields = []
+    for p_idx, para in enumerate(doc.paragraphs):
+        text = para.text.strip()
+        if not text:
+            continue
+        
+        # 检查段落中是否包含下划线run
+        label_text = ""
+        has_underline_blank = False
+        for run in para.runs:
+            is_underline = False
+            # 检查python-docx的underline属性
+            if run.underline and run.underline not in (False, 0):
+                is_underline = True
+            # 也检查XML中的w:u元素
+            if not is_underline:
+                rPr = run._element.find(qn('w:rPr'))
+                if rPr is not None:
+                    u_elem = rPr.find(qn('w:u'))
+                    if u_elem is not None:
+                        val = u_elem.get(qn('w:val'))
+                        if val and val not in ('none',):
+                            is_underline = True
+            
+            if is_underline:
+                # 下划线run，内容应该是空白/空格（待填区域）
+                if not run.text.strip():
+                    has_underline_blank = True
+                else:
+                    # 下划线run有内容，可能已有值，暂不处理
+                    pass
+            else:
+                # 非下划线run，收集标签文字
+                label_text += run.text
+        
+        label_text = label_text.strip()
+        
+        if not has_underline_blank or not label_text:
+            continue
+        
+        # 过滤：标签太短或太长的不合理
+        if len(label_text) < 2 or len(label_text) > 20:
+            continue
+        
+        # 过滤黑名单
+        if label_text in _LABEL_BLACKLIST:
+            continue
+        
+        # 过滤选项类
+        normalized = label_text.replace(" ", "").replace("　", "")
+        if label_text in _OPTION_WORDS or normalized in _OPTION_WORDS:
+            continue
+        
+        fields.append({
+            "field_id": f"P{p_idx}",
+            "label": label_text,
+            "pattern": "paragraph_underline",
+            "table_idx": -1,
+            "row_idx": p_idx,
+            "col_idx": -1,
+            "existing_value": "",
+            "fill_mode": "paragraph_underline",
+            "description": f"请填写{label_text}",
+            "row_indices": [p_idx],
+            "repeat_count": 1,
+        })
+    
+    return fields
 
 
 def analyze_template(template_path: str) -> dict:
@@ -297,6 +396,9 @@ def analyze_template(template_path: str) -> dict:
                     # 日期占位符需要replace而非append
                     fill_mode = "append"
                     if existing_value and _DATE_PLACEHOLDER_LOOSE_RE.match(existing_value.strip()):
+                        fill_mode = "replace"
+                    # 标签+填写说明模式：整个单元格需要被替换（如"主要教学经历（授课名称...）"）
+                    if existing_value and re.match(r'^.+?（[^）]{2,}）\s*$', existing_value):
                         fill_mode = "replace"
                     label_fields.append({
                         "field_id": field_id,
@@ -475,6 +577,10 @@ def analyze_template(template_path: str) -> dict:
                             row_group_rows[(t_idx, marked_r)] = group_id
                         continue
             r += 1
+
+    # ── 3.5 扫描文档正文段落中的下划线横线字段（如"教材名称______"） ──
+    paragraph_fields = _scan_paragraph_underline_fields(doc)
+    label_fields.extend(paragraph_fields)
 
     # ── 4. 去重 label_fields: 同一表格同一列的重复标签合并 ──
     # 注意：有 section_context 的字段用 (t, col, section, label) 去重，

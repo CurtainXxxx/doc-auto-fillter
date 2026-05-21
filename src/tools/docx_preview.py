@@ -115,6 +115,20 @@ def docx_to_html(template_path: str) -> dict:
             parts.append(_render_table(table, t_idx, cell_fields))
 
         elif tag == 'p':
+            # 检查是否是段落级下划线字段（如"教材名称______"）
+            para_field_id = None
+            p_idx = None
+            # 查找段落索引
+            for pi, para in enumerate(doc.paragraphs):
+                if para._element is element:
+                    p_idx = pi
+                    break
+            
+            if p_idx is not None:
+                pfid = f"P{p_idx}"
+                if pfid in field_map:
+                    para_field_id = pfid
+            
             para_text = ""
             for child in element.iter(qn('w:t')):
                 if child.text:
@@ -133,7 +147,19 @@ def docx_to_html(template_path: str) -> dict:
                 elif align == 'right':
                     style = ' style="text-align:right"'
 
-                parts.append(f'<p{style}>{_escape(para_text.strip())}</p>')
+                # 如果是段落级字段，添加字段标记
+                if para_field_id:
+                    info = field_map[para_field_id]
+                    label = info["label"]
+                    # 渲染为: 标签 + [可填区域]
+                    parts.append(
+                        f'<p{style}>'
+                        f'<span class="field-label">{_escape(label)}</span>'
+                        f'<span class="field-blank" data-field-id="{para_field_id}" data-label="{_escape(label)}">'
+                        f'____________</span></p>'
+                    )
+                else:
+                    parts.append(f'<p{style}>{_escape(para_text.strip())}</p>')
 
     html = '\n'.join(parts)
 

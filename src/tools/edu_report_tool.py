@@ -502,6 +502,9 @@ def _fill_label_fields(doc, label_fields, data):
         label = f["label"]
         if label not in data:
             continue
+        # 跳过段落级字段（由_fill_paragraph_fields单独处理）
+        if f.get("pattern") == "paragraph_underline":
+            continue
         value = data[label]
         fill_mode = f.get("fill_mode", "append")
         pattern = f.get("pattern", "colon")
@@ -555,6 +558,44 @@ def _fill_label_fields(doc, label_fields, data):
                     else:
                         # 标准冒号模式：在标签后追加值
                         _append_value_to_tc_after_label(tc, label, str(value))
+
+
+def _fill_paragraph_fields(doc, paragraph_fields, data):
+    """填充正文段落中的下划线横线字段。
+    
+    格式：段落中有"标签(无下划线) + 空白(有下划线)"的run结构，
+    需要将值填入下划线run中，保留下划线格式。
+    """
+    for f in paragraph_fields:
+        label = f["label"]
+        if label not in data:
+            continue
+        value = str(data[label])
+        
+        p_idx = f["row_idx"]
+        if p_idx >= len(doc.paragraphs):
+            continue
+        
+        para = doc.paragraphs[p_idx]
+        
+        # 找到下划线run并填入值
+        for run in para.runs:
+            is_underline = False
+            if run.underline and run.underline not in (False, 0):
+                is_underline = True
+            if not is_underline:
+                rPr = run._element.find(qn('w:rPr'))
+                if rPr is not None:
+                    u_elem = rPr.find(qn('w:u'))
+                    if u_elem is not None:
+                        val = u_elem.get(qn('w:val'))
+                        if val and val not in ('none',):
+                            is_underline = True
+            
+            if is_underline and not run.text.strip():
+                # 将下划线空白run替换为填入的值
+                run.text = f" {value} "
+                break
 
 
 def _fill_checkbox_rows_in_table(doc, analysis, data):
@@ -1196,12 +1237,18 @@ def _build_report_docx(template_path: str, user_data: dict):
     # 过滤掉勾选框字段（pattern=checkbox由_fill_checkbox_rows_in_table单独处理）
     # 以及勾选框空白格位置的label字段（避免重复填充冲突）
     # 但保留勾选框行中非空白格位置的label字段（如"教师姓名"）
+    # 同时分离出段落级下划线字段（pattern=paragraph_underline由_fill_paragraph_fields处理）
     filtered_fields = []
+    paragraph_fields = []
     for f in analysis["label_fields"]:
         # 1. checkbox模式字段直接跳过
         if f.get("pattern") == "checkbox":
             continue
-        # 2. 勾选框空白格位置的字段跳过
+        # 2. paragraph_underline模式字段单独处理
+        if f.get("pattern") == "paragraph_underline":
+            paragraph_fields.append(f)
+            continue
+        # 3. 勾选框空白格位置的字段跳过
         t_idx = f["table_idx"]
         skip = False
         for r_idx in f["row_indices"]:
@@ -1213,6 +1260,9 @@ def _build_report_docx(template_path: str, user_data: dict):
     
     # 3. 填充标签字段（不含勾选框行）
     _fill_label_fields(doc, filtered_fields, expanded_data)
+    
+    # 3.5 填充段落级下划线字段
+    _fill_paragraph_fields(doc, paragraph_fields, expanded_data)
     
     # 4. 填充勾选框行（独立于标签字段，智能识别选项+空白格模式）
     _fill_checkbox_rows_in_table(doc, analysis, expanded_data)
@@ -1291,8 +1341,13 @@ def _fill_custom_template(template_path: str, user_data: dict):
                     checkbox_blank_cells.add((t_idx, r_idx, ci))
     
     # 过滤掉勾选框空白格位置的label字段
+    # 同时分离出段落级下划线字段
     filtered_fields = []
+    paragraph_fields = []
     for f in analysis["label_fields"]:
+        if f.get("pattern") == "paragraph_underline":
+            paragraph_fields.append(f)
+            continue
         t_idx = f["table_idx"]
         skip = False
         for r_idx in f["row_indices"]:
@@ -1304,6 +1359,9 @@ def _fill_custom_template(template_path: str, user_data: dict):
     
     # 2. 填充标签字段（使用展开后的数据）
     _fill_label_fields(doc, filtered_fields, expanded_data)
+    
+    # 2.5 填充段落级下划线字段
+    _fill_paragraph_fields(doc, paragraph_fields, expanded_data)
     
     # 3. 填充勾选框行
     _fill_checkbox_rows_in_table(doc, analysis, expanded_data)
