@@ -813,7 +813,7 @@ async function callAgent(userText) {
                 currentDocxPath = toolResult.local_path;
               }
               // 工具返回后刷新预览文档（重新获取带值预览）
-              if (toolResult.local_path && currentTemplatePath) {
+              if (toolResult.local_path) {
                 refreshPreviewFromGeneratedDoc(toolResult.local_path);
               }
             } catch(e) { console.warn('[preview] tool result parse error:', e); }
@@ -890,7 +890,7 @@ async function refreshPreviewFromGeneratedDoc(localPath) {
     const data = await res.json();
     if (data.success) {
       // 更新预览 HTML
-      const previewArea = document.getElementById('docxPreviewArea');
+      const previewArea = document.getElementById('previewBody');
       if (previewArea) {
         previewArea.innerHTML = data.html;
       }
