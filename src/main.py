@@ -507,31 +507,56 @@ async def health_check():
 
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
-    """接收前端上传的文件，解析文本内容后返回"""
+async def upload_file(files: list[UploadFile] = File(...)):
+    """接收前端上传的文件（支持单个或多个），解析文本内容后返回"""
     import tempfile
     from tools.knowledge_tool import extract_text_from_upload
 
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided")
+    results = []
+    total_size = 0
 
-    # 文件大小限制 10MB
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+    for file in files:
+        if not file.filename:
+            continue
 
-    # 保存到临时文件
-    suffix = os.path.splitext(file.filename)[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
+        # 文件大小限制 10MB
+        content = await file.read()
+        total_size += len(content)
+        if len(content) > 10 * 1024 * 1024:
+            results.append({
+                "success": False,
+                "filename": file.filename,
+                "error": f"File too large ({len(content)/1024/1024:.1f}MB, max 10MB)",
+            })
+            continue
 
-    try:
-        result = extract_text_from_upload(tmp_path)
-        result["filename"] = file.filename
-        return JSONResponse(content=result)
-    finally:
-        os.unlink(tmp_path)
+        # 保存到临时文件
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            result = extract_text_from_upload(tmp_path)
+            result["filename"] = file.filename
+            results.append(result)
+        finally:
+            os.unlink(tmp_path)
+
+    if not results:
+        raise HTTPException(status_code=400, detail="No valid files provided")
+
+    # 单文件：保持向后兼容，返回扁平结构
+    if len(results) == 1:
+        return JSONResponse(content=results[0])
+
+    # 多文件：返回列表结构
+    return JSONResponse(content={
+        "success": True,
+        "multiple": True,
+        "file_count": len(results),
+        "files": results,
+    })
 
 
 @app.post("/upload-template")

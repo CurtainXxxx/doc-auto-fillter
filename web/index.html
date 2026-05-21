@@ -608,18 +608,18 @@ html, body {
         </button>
         <button class="func-btn" id="funcUpload" onclick="triggerUpload()">
           <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></span>
-          <span class="func-text"><span class="title">知识文件上传</span><span class="desc">上传文件自动提取</span></span>
+          <span class="func-text"><span class="title">知识文件上传</span><span class="desc">支持多文件批量提取</span></span>
         </button>
       </div>
       <input type="file" id="templateFileInput" accept=".docx,.doc" style="display:none" onchange="handleTemplateUpload(event)" />
     </div>
 
     <div class="chat-input">
-      <div class="upload-btn" title="上传文件">
+      <div class="upload-btn" title="上传文件（支持多选）">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-        <input type="file" id="fileInput" accept=".docx,.doc,.pdf,.xlsx,.xls,.csv,.txt" onchange="handleFileUpload(event)" />
+        <input type="file" id="fileInput" accept=".docx,.doc,.pdf,.xlsx,.xls,.csv,.txt" multiple onchange="handleFileUpload(event)" />
       </div>
-      <textarea id="userInput" rows="1" placeholder="输入信息..." onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
+      <textarea id="userInput" rows="1" placeholder="输入信息或上传文件（📎支持多选）..." onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
       <button class="send-btn" id="sendBtn" onclick="sendMessage()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
@@ -1388,26 +1388,57 @@ function triggerUpload() {
 
 async function handleFileUpload(event) {
   if (!UPLOAD_URL) { alert('请通过部署后的 Web 服务 URL 访问。'); return; }
-  const file = event.target.files[0];
-  if (!file) return;
+  const files = Array.from(event.target.files);
+  if (!files.length) return;
   event.target.value = '';
 
-  const sizeStr = file.size < 1024*1024 ? (file.size/1024).toFixed(1)+'KB' : (file.size/1024/1024).toFixed(1)+'MB';
-  appendMessage('user', `上传了文件: ${file.name}（${sizeStr}）`);
+  // 显示上传消息
+  if (files.length === 1) {
+    const sizeStr = files[0].size < 1024*1024 ? (files[0].size/1024).toFixed(1)+'KB' : (files[0].size/1024/1024).toFixed(1)+'MB';
+    appendMessage('user', `上传了文件: ${files[0].name}（${sizeStr}）`);
+  } else {
+    const totalSize = files.reduce((s, f) => s + f.size, 0);
+    const sizeStr = totalSize < 1024*1024 ? (totalSize/1024).toFixed(1)+'KB' : (totalSize/1024/1024).toFixed(1)+'MB';
+    const names = files.map(f => f.name).join('、');
+    appendMessage('user', `上传了${files.length}个文件（${sizeStr}）：${names}`);
+  }
 
+  // 构建多文件 FormData
   const formData = new FormData();
-  formData.append('file', file);
+  for (const file of files) {
+    formData.append('files', file);
+  }
 
   try {
     const resp = await fetch(UPLOAD_URL, { method: 'POST', body: formData });
     if (!resp.ok) throw new Error(`上传失败 HTTP ${resp.status}`);
     const result = await resp.json();
 
-    if (result.success && result.extracted_text) {
-      const agentMsg = `我上传了文件"${file.name}"，以下是文件内容，请从中提取填写文档所需的信息：\n\n${result.extracted_text.substring(0, 3000)}`;
-      await callAgent(agentMsg);
+    // 处理多文件响应
+    if (result.multiple && result.files) {
+      // 多文件模式：合并所有文件内容
+      const fileParts = [];
+      for (const f of result.files) {
+        if (f.success && f.extracted_text) {
+          fileParts.push(`=== 文件：${f.filename} ===\n${f.extracted_text.substring(0, 4000)}`);
+        } else if (!f.success) {
+          fileParts.push(`=== 文件：${f.filename} ===\n[解析失败: ${f.error || '未知错误'}]`);
+        }
+      }
+      if (fileParts.length > 0) {
+        const agentMsg = `我上传了${result.file_count}个文件，以下是各文件内容，请从中提取填写文档所需的信息：\n\n${fileParts.join('\n\n')}`;
+        await callAgent(agentMsg);
+      } else {
+        appendMessage('assistant', `所有文件解析失败，请尝试其他格式或直接输入信息。`);
+      }
     } else {
-      appendMessage('assistant', `文件解析失败：${result.error || '未知错误'}，请尝试其他格式或直接输入信息。`);
+      // 单文件模式（向后兼容）
+      if (result.success && result.extracted_text) {
+        const agentMsg = `我上传了文件"${result.filename}"，以下是文件内容，请从中提取填写文档所需的信息：\n\n${result.extracted_text.substring(0, 3000)}`;
+        await callAgent(agentMsg);
+      } else {
+        appendMessage('assistant', `文件解析失败：${result.error || '未知错误'}，请尝试其他格式或直接输入信息。`);
+      }
     }
   } catch (err) {
     appendMessage('assistant', `文件上传失败：${escapeHtml(err.message)}，请检查网络后重试。`);
@@ -1610,7 +1641,7 @@ window.addEventListener('load', () => {
       '您好，请选择操作方式：\n\n' +
       '· 点击下方「内置模板」选择预设模板\n' +
       '· 点击「上传模板」上传Word文档自动识别\n' +
-      '· 点击「知识文件上传」提取文件信息\n' +
+      '· 点击「知识文件上传」批量上传文件提取信息\n' +
       '· 或直接输入消息开始'
     );
   } else {
