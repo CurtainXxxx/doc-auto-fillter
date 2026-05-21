@@ -466,6 +466,31 @@ html, body {
   gap: 2px;
 }
 
+/* ── Generating overlay (preserves preview underneath) ── */
+.generating-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 6px;
+}
+.generating-overlay .spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.generating-overlay p {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 /* ── Progress bar ── */
 .fill-progress {
   margin-bottom: 14px;
@@ -882,26 +907,44 @@ function parseFieldsLines(fieldsText) {
   }
 }
 
-// ── Refresh preview from a generated docx (re-render preview with actual values) ──
+// ── Refresh preview from a generated docx (update cell values in existing preview) ──
 async function refreshPreviewFromGeneratedDoc(localPath) {
-  // 从生成的 docx 重新获取预览，展示实际填写效果
+  // 从生成的 docx 获取填写后的数据，更新现有预览中的单元格值
+  // 不替换整个 HTML，保留 editable 结构和 data-field-id 属性
   try {
     const res = await fetch('/generated-preview?local_path=' + encodeURIComponent(localPath));
     const data = await res.json();
     if (data.success) {
-      // 更新预览 HTML
-      const previewArea = document.getElementById('previewBody');
-      if (previewArea) {
-        previewArea.innerHTML = data.html;
-      }
-      // 更新字段映射
+      // 使用 field_map 中的 existing_value 精确更新每个已填单元格
       if (data.field_map) {
-        Object.assign(fieldMap, data.field_map);
+        for (const [fieldId, info] of Object.entries(data.field_map)) {
+          const existingValue = info.existing_value;
+          if (existingValue && String(existingValue).trim()) {
+            // 查找当前预览中的对应元素并更新
+            const els = document.querySelectorAll('[data-field-id="' + CSS.escape(fieldId) + '"]');
+            for (const el of els) {
+              if (el.classList.contains('cell-value')) {
+                el.textContent = existingValue;
+                el.classList.add('filled');
+                el.classList.remove('empty');
+              } else if (el.classList.contains('editable')) {
+                el.textContent = existingValue;
+                el.classList.remove('empty');
+                el.classList.add('filled');
+              }
+            }
+          }
+        }
+        // 注意：填充后文档的 field_map 可能不完整（已填值的单元格不再被识别为可填字段），
+        // 因此不能直接用 Object.assign 覆盖 fieldMap，只更新已有条目的 existing_value
+        for (const [fid, info] of Object.entries(data.field_map)) {
+          if (fieldMap[fid]) {
+            fieldMap[fid].existing_value = info.existing_value || '';
+          }
+        }
       }
-      if (data.label_to_fields) {
-        Object.assign(labelToFields, data.label_to_fields);
-      }
-      console.log('[preview] refreshPreviewFromGeneratedDoc: refreshed from generated doc');
+      // label_to_fields 同样不覆盖，保留原始模板的完整映射
+      console.log('[preview] refreshPreviewFromGeneratedDoc: updated field values from generated doc');
     }
   } catch(e) {
     console.warn('[preview] refreshPreviewFromGeneratedDoc failed:', e);
@@ -1258,11 +1301,25 @@ function updatePreview(state) {
 
     case 'generating':
       title.textContent = '生成中...';
-      body.innerHTML = `<div class="generating"><div class="spinner"></div><p>正在生成文档...</p></div>`;
+      // 不替换预览内容，仅叠加半透明遮罩+进度提示，保留已有字段填写状态
+      if (!body.querySelector('.generating-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.className = 'generating-overlay';
+        overlay.innerHTML = '<div class="spinner"></div><p>正在生成文档...</p>';
+        const docPage = body.querySelector('.doc-page');
+        if (docPage) {
+          docPage.style.position = 'relative';
+          docPage.appendChild(overlay);
+        } else {
+          body.appendChild(overlay);
+        }
+      }
       break;
 
     case 'done':
       title.textContent = '文档已生成';
+      // 移除生成中的遮罩
+      body.querySelectorAll('.generating-overlay').forEach(el => el.remove());
       if (docPreviewHtml && currentDownloadUrl) {
         // 保留文档预览，下载提示放在工具栏
         const body = document.getElementById('previewBody');
@@ -1279,26 +1336,34 @@ function updatePreview(state) {
         `;
         actions.style.display = 'flex';
       } else if (currentDownloadUrl) {
-        body.innerHTML = `
-          <div class="doc-done-card">
-            <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
-            <h4>文档生成完成</h4>
-            <p>格式与模板一致</p>
-            <button onclick="downloadDoc()" class="dl-btn" style="cursor:pointer;border:none;">下载 Word 文档</button>
-            <div class="checks">
-              · 文档格式与模板一致<br>
-              · 所有字段已填入<br>
-              · 链接 24 小时内有效
-            </div>
-          </div>`;
+        // 只有在预览区确实没有文档内容时才显示完成卡片
+        const existingDocPage = body.querySelector('.doc-page');
+        if (!existingDocPage) {
+          body.innerHTML = `
+            <div class="doc-done-card">
+              <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
+              <h4>文档生成完成</h4>
+              <p>格式与模板一致</p>
+              <button onclick="downloadDoc()" class="dl-btn" style="cursor:pointer;border:none;">下载 Word 文档</button>
+              <div class="checks">
+                · 文档格式与模板一致<br>
+                · 所有字段已填入<br>
+                · 链接 24 小时内有效
+              </div>
+            </div>`;
+        }
         document.getElementById('previewActions').style.display = 'flex';
       } else {
-        body.innerHTML = `
-          <div class="doc-done-card">
-            <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
-            <h4>文档生成完成</h4>
-            <p>文档正在上传，请稍候...</p>
-          </div>`;
+        // 无下载链接时，保留已有预览内容
+        const existingDocPage = body.querySelector('.doc-page');
+        if (!existingDocPage) {
+          body.innerHTML = `
+            <div class="doc-done-card">
+              <div class="done-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg></div>
+              <h4>文档生成完成</h4>
+              <p>文档正在上传，请稍候...</p>
+            </div>`;
+        }
         document.getElementById('previewActions').style.display = 'none';
       }
       break;
