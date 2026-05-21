@@ -192,6 +192,26 @@ def _set_cell_text(cell, text: str, rPr_source=None):
     _set_tc_text(cell._element, text, rPr_source=rPr_source)
 
 
+def _replace_signature_and_date_in_tc(tc, label: str, existing_value: str, value: str):
+    """在tc元素中，处理"负责人签名：年月日"格式——在标签后追加签名，可选替换日期占位符。
+    
+    场景1：值只有签名（如"李明"）→ 在签名后追加名字，日期占位符保持不变
+    场景2：值包含签名+日期（如"李明 2024年12月15日"）→ 同时替换日期占位符
+    """
+    import re as _re
+    _EMBEDDED_DATE_PAT = _re.compile(r'年\s*月\s*日(?:\s*(?:上午|下午|上|下))?')
+    _DATE_VALUE_PAT = _re.compile(r'(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日')
+    
+    # 判断value是否包含日期
+    date_match = _DATE_VALUE_PAT.search(value)
+    if date_match:
+        # 值包含日期，同时替换签名和日期
+        _replace_embedded_date_in_tc(tc, label, existing_value, value)
+    else:
+        # 值只是签名，在标签后追加签名，保留日期占位符
+        _append_value_to_tc_after_label(tc, label, value)
+
+
 def _replace_embedded_date_in_tc(tc, label: str, existing_value: str, value: str):
     """在tc元素中，替换嵌入式日期占位符为实际值。
     
@@ -503,13 +523,24 @@ def _fill_label_fields(doc, label_fields, data):
                     _set_tc_text(tcs[col_idx], str(value), rPr_source=rPr_source)
             
             elif fill_mode == "replace":
-                # 占位符替换模式：清空格内容后写入新值（保留原run格式）
+                # 占位符替换模式
                 col_idx = f["col_idx"]
                 tr = table.rows[ri]._tr
                 tcs = tr.findall(qn("w:tc"))
                 if col_idx < len(tcs):
-                    rPr_source = _find_label_rPr_in_row(tr)
-                    _set_tc_text(tcs[col_idx], str(value), rPr_source=rPr_source)
+                    tc = tcs[col_idx]
+                    raw_label = f.get("raw_label", label)
+                    existing_value = f.get("existing_value", "")
+                    # colon模式 + 日期占位符：在标签后追加签名并替换日期占位符
+                    if pattern == "colon" and existing_value and _EMBEDDED_DATE_PAT.search(existing_value):
+                        _replace_signature_and_date_in_tc(tc, raw_label, existing_value, str(value))
+                    elif pattern == "colon" and not existing_value:
+                        # colon模式空值：在标签后追加
+                        _append_value_to_tc_after_label(tc, raw_label, str(value))
+                    else:
+                        # 非colon模式：清空格内容后写入新值
+                        rPr_source = _find_label_rPr_in_row(tr)
+                        _set_tc_text(tc, str(value), rPr_source=rPr_source)
             
             elif fill_mode == "append":
                 col_idx = f["col_idx"]

@@ -239,27 +239,78 @@ def analyze_template(template_path: str) -> dict:
     row_group_rows = {}  # {(table_idx, row_idx): group_id}
 
     for t_idx, table in enumerate(doc.tables):
+        # ── 0.5 预扫描：提取每行的section标题（整行合并单元格） ──
+        # section标题是单元格文本的第一行或冒号前的简短文字
+        _row_section_titles = {}  # {(t_idx, r_idx): section_title}
+        for r_idx, row in enumerate(table.rows):
+            unique = _get_unique_cells(row)
+            if len(unique) == 1:
+                full_text = unique[0].text.strip().replace('\n', '|')
+                # 尝试取第一行（以|分隔）
+                first_line = full_text.split('|')[0].strip()
+                # 尝试取冒号/换行前的文字
+                for sep in ['：', ':']:
+                    if sep in first_line:
+                        first_line = first_line.split(sep)[0].strip()
+                        break
+                # section标题特征：文字简短（2~25字），不是占位符
+                if 2 <= len(first_line) <= 25 and not _is_placeholder_cell(unique[0]):
+                    _row_section_titles[(t_idx, r_idx)] = first_line
+
         # ── 1. 扫描冒号模式字段 ("标签：值") ──
         for r_idx, row in enumerate(table.rows):
             unique = _get_unique_cells(row)
             if _is_section_title_row(unique):
                 continue
 
+            # 查找最近的上方section标题作为上下文
+            section_ctx = None
+            for up_r in range(r_idx - 1, -1, -1):
+                if (t_idx, up_r) in _row_section_titles:
+                    section_ctx = _row_section_titles[(t_idx, up_r)]
+                    break
+
             for c_idx, cell in enumerate(unique):
                 labels = _extract_labels_from_cell(cell)
                 for line_idx, (label, existing_value) in enumerate(labels):
                     field_id = f"T{t_idx}_R{r_idx}_C{c_idx}_L{line_idx}"
+                    # 如果有section上下文，用"section标题-label"格式区分
+                    display_label = label
+                    desc = f"请填写{label}" if not existing_value else f"{label}(已有:{existing_value})"
+                    if section_ctx and label in ("负责人签名", "申请人签名", "签名", "日期", "审批意见"):
+                        # 截取section标题的关键区分部分
+                        short_ctx = section_ctx
+                        if len(section_ctx) > 8:
+                            # 取关键词：去掉"审批意见"/"审批"等后缀
+                            for suffix in ["审批意见", "审批", "意见"]:
+                                if section_ctx.endswith(suffix) and len(section_ctx) > len(suffix) + 2:
+                                    short_ctx = section_ctx[:-len(suffix)]
+                                    break
+                            # 如果仍超8字，进一步缩短
+                            if len(short_ctx) > 8:
+                                for suffix2 in ["教学运行数据", "管理部门"]:
+                                    if short_ctx.endswith(suffix2):
+                                        short_ctx = short_ctx[:-len(suffix2)]
+                                        break
+                        display_label = f"{short_ctx}-{label}"
+                        desc = f"请填写{short_ctx}的{label}" if not existing_value else f"{short_ctx}-{label}(已有:{existing_value})"
+                    # 日期占位符需要replace而非append
+                    fill_mode = "append"
+                    if existing_value and _DATE_PLACEHOLDER_LOOSE_RE.match(existing_value.strip()):
+                        fill_mode = "replace"
                     label_fields.append({
                         "field_id": field_id,
                         "table_idx": t_idx,
                         "row_idx": r_idx,
                         "col_idx": c_idx,
                         "line_idx": line_idx,
-                        "label": label,
+                        "label": display_label,
+                        "raw_label": label,
                         "existing_value": existing_value,
-                        "description": f"请填写{label}" if not existing_value else f"{label}(已有:{existing_value})",
-                        "fill_mode": "append",
+                        "description": desc,
+                        "fill_mode": fill_mode,
                         "pattern": "colon",
+                        "section_context": section_ctx,
                     })
 
         # ── 2. 扫描"标签格+空白格/占位符格"模式 ──
@@ -426,9 +477,15 @@ def analyze_template(template_path: str) -> dict:
             r += 1
 
     # ── 4. 去重 label_fields: 同一表格同一列的重复标签合并 ──
+    # 注意：有 section_context 的字段用 (t, col, section, label) 去重，
+    #       不同审批环节的同名签名不应合并
     label_occurrences = {}
     for f in label_fields:
-        key = (f["table_idx"], f["col_idx"], f["label"])
+        section = f.get("section_context")
+        if section:
+            key = (f["table_idx"], f["col_idx"], section, f["label"])
+        else:
+            key = (f["table_idx"], f["col_idx"], f["label"])
         if key not in label_occurrences:
             label_occurrences[key] = []
         label_occurrences[key].append(f)
