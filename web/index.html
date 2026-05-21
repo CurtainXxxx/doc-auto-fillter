@@ -441,6 +441,19 @@ html, body {
   border-radius: 2px;
 }
 
+/* 字段填充闪烁动画 */
+@keyframes fieldFlash {
+  0% { background: #FEF3C7; box-shadow: 0 0 0 2px #F59E0B; }
+  50% { background: #FEF3C7; }
+  100% { background: transparent; box-shadow: none; }
+}
+.field-flash {
+  animation: fieldFlash 1.2s ease-out;
+}
+.cell-value.field-flash {
+  animation: fieldFlash 1.2s ease-out;
+}
+
 /* Multi-line colon fields */
 .doc-cell.colon-field.multi-line {
   flex-direction: column;
@@ -763,6 +776,8 @@ async function callAgent(userText) {
     let fullText = '';
     let buffer = '';
     let lastFieldCheckLen = 0;
+    let inFieldsBlock = false;   // 是否正在 [FIELDS] 块中
+    let lastFieldLineLen = 0;    // 上次解析 [FIELDS] 行时的文本长度
 
     while (true) {
       const { done, value } = await reader.read();
@@ -785,28 +800,47 @@ async function callAgent(userText) {
             // 解析工具结果，优先使用精确 field_id 回填，其次再用 label 回填
             try {
               const toolResult = JSON.parse(delta.content);
+              console.log('[preview] tool result keys:', Object.keys(toolResult));
               if (toolResult.filled_field_values && typeof toolResult.filled_field_values === 'object') {
+                console.log('[preview] applying filled_field_values:', Object.keys(toolResult.filled_field_values).length, 'fields');
                 applyPreciseFieldValues(toolResult.filled_field_values);
               }
               if (toolResult.filled_data && typeof toolResult.filled_data === 'object') {
+                console.log('[preview] applying filled_data:', Object.keys(toolResult.filled_data).length, 'fields');
                 applyFilledData(toolResult.filled_data);
               }
               if (toolResult.local_path) {
                 currentDocxPath = toolResult.local_path;
               }
-            } catch(e) {}
+              // 工具返回后刷新预览文档（重新获取带值预览）
+              if (toolResult.local_path && currentTemplatePath) {
+                refreshPreviewFromGeneratedDoc(toolResult.local_path);
+              }
+            } catch(e) { console.warn('[preview] tool result parse error:', e); }
             continue;
           }
 
           if (delta.content) {
             fullText += delta.content;
+
+            // 实时增量解析 [FIELDS] 块：每收到一行 key=value 立即更新预览
+            if (fullText.includes('[FIELDS]')) {
+              const afterFields = fullText.substring(fullText.indexOf('[FIELDS]') + 8);
+              const beforeClose = afterFields.includes('[/FIELDS]') ? afterFields.indexOf('[/FIELDS]') : afterFields.length;
+              const fieldsText = afterFields.substring(0, beforeClose);
+              if (fieldsText.length > lastFieldLineLen) {
+                lastFieldLineLen = fieldsText.length;
+                parseFieldsLines(fieldsText);
+              }
+            }
+
             // 渲染时隐藏 [FIELDS]...[/FIELDS] 块
             const displayText = fullText.replace(/\[FIELDS\][\s\S]*?\[\/FIELDS\]/g, '').trim();
             bubble.innerHTML = renderMarkdown(displayText);
             document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
 
-            // 实时检测字段值并更新预览
-            if (fullText.length - lastFieldCheckLen > 30) {
+            // 定期也检测非 FIELDS 格式的键值对
+            if (fullText.length - lastFieldCheckLen > 60) {
               lastFieldCheckLen = fullText.length;
               detectAndUpdateFields(fullText);
             }
@@ -828,14 +862,71 @@ async function callAgent(userText) {
   }
 }
 
+// ── Incrementally parse [FIELDS] block lines and update preview ──
+function parseFieldsLines(fieldsText) {
+  const lines = fieldsText.split('\n');
+  for (const line of lines) {
+    const eqIdx = line.indexOf('=');
+    if (eqIdx > 0) {
+      const key = line.substring(0, eqIdx).trim();
+      const val = line.substring(eqIdx + 1).trim();
+      if (key && val) {
+        // 优先用 field_id 精确匹配
+        if (fieldMap[key]) {
+          updateFieldById(key, val);
+        } else {
+          updateFieldByLabel(key, val);
+        }
+      }
+    }
+  }
+}
+
+// ── Refresh preview from a generated docx (re-render preview with actual values) ──
+async function refreshPreviewFromGeneratedDoc(localPath) {
+  // 从生成的 docx 重新获取预览，展示实际填写效果
+  try {
+    const res = await fetch('/generated-preview?local_path=' + encodeURIComponent(localPath));
+    const data = await res.json();
+    if (data.success) {
+      // 更新预览 HTML
+      const previewArea = document.getElementById('docxPreviewArea');
+      if (previewArea) {
+        previewArea.innerHTML = data.html;
+      }
+      // 更新字段映射
+      if (data.field_map) {
+        Object.assign(fieldMap, data.field_map);
+      }
+      if (data.label_to_fields) {
+        Object.assign(labelToFields, data.label_to_fields);
+      }
+      console.log('[preview] refreshPreviewFromGeneratedDoc: refreshed from generated doc');
+    }
+  } catch(e) {
+    console.warn('[preview] refreshPreviewFromGeneratedDoc failed:', e);
+  }
+}
+
 // ── Apply precise field_id -> value result from tool ──
 function applyPreciseFieldValues(fieldValues) {
   if (!fieldValues || typeof fieldValues !== 'object') return;
+  let updatedCount = 0;
   for (const [fieldId, value] of Object.entries(fieldValues)) {
-    if (fieldMap[fieldId] && value && String(value).trim()) {
-      updateFieldById(fieldId, String(value));
+    if (value && String(value).trim()) {
+      const strVal = String(value);
+      // 1. 先用 field_id 精确匹配
+      if (fieldMap[fieldId]) {
+        updateFieldById(fieldId, strVal);
+        updatedCount++;
+      } else {
+        // 2. field_id 不在 fieldMap 中，直接尝试 DOM 查找
+        updateCellInPreview(fieldId, strVal);
+        updatedCount++;
+      }
     }
   }
+  console.log('[preview] applyPreciseFieldValues: updated', updatedCount, '/', Object.keys(fieldValues).length, 'fields');
 }
 
 // ── Apply label -> value result from tool (fallback) ──
@@ -850,27 +941,17 @@ function applyFilledData(filledData) {
 
 // ── Detect field values from agent text & update document preview ──
 function detectAndUpdateFields(text) {
-  // 1. 优先解析 [FIELDS]...[/FIELDS] 格式（Agent 回显）
+  // 1. 优先解析 [FIELDS]...[/FIELDS] 格式（完整块）
   const fieldsBlock = text.match(/\[FIELDS\]([\s\S]*?)\[\/FIELDS\]/);
   if (fieldsBlock) {
-    const lines = fieldsBlock[1].split('\n');
-    for (const line of lines) {
-      const eqIdx = line.indexOf('=');
-      if (eqIdx > 0) {
-        const key = line.substring(0, eqIdx).trim();
-        const val = line.substring(eqIdx + 1).trim();
-        if (key && val) {
-          if (fieldMap[key]) {
-            updateFieldById(key, val);
-          } else {
-            updateFieldByLabel(key, val);
-          }
-        }
-      }
-    }
+    parseFieldsLines(fieldsBlock[1]);
+  } else if (text.includes('[FIELDS]')) {
+    // 增量：[FIELDS] 已开始但 [/FIELDS] 还没到
+    const afterFields = text.substring(text.indexOf('[FIELDS]') + 8);
+    parseFieldsLines(afterFields);
   }
 
-  // 2. 去掉 markdown 加粗标记
+  // 2. 去掉 markdown 加粗标记和 [FIELDS] 块
   const clean = text.replace(/\*\*/g, '').replace(/\[FIELDS\][\s\S]*?\[\/FIELDS\]/g, '');
 
   // 3. 匹配多种格式：
@@ -971,6 +1052,14 @@ function updateCellInPreview(fieldId, value) {
       el.textContent = value;
       el.classList.remove('empty');
       el.classList.toggle('filled', !!value.trim());
+    }
+
+    // 高亮动画：字段被填充时闪烁
+    if (value.trim()) {
+      el.classList.remove('field-flash');
+      // 触发 reflow 以重新启动动画
+      void el.offsetWidth;
+      el.classList.add('field-flash');
     }
   }
   // 更新进度条

@@ -623,6 +623,29 @@ async def template_preview(path: str = ""):
         return JSONResponse(content={"success": False, "message": f"预览生成失败: {e}"})
 
 
+@app.get("/generated-preview")
+async def generated_preview(local_path: str = ""):
+    """将生成的 docx 文件转为 HTML 预览（含填写后的内容）"""
+    if not local_path:
+        return JSONResponse(content={"success": False, "message": "缺少 local_path 参数"})
+
+    if not os.path.exists(local_path):
+        return JSONResponse(content={"success": False, "message": f"文件不存在: {local_path}"})
+
+    try:
+        from tools.docx_preview import docx_to_html
+        result = docx_to_html(local_path)
+        return JSONResponse(content={
+            "success": True,
+            "html": result["html"],
+            "field_map": result["field_map"],
+            "label_to_fields": result["label_to_fields"],
+        })
+    except Exception as e:
+        logger.exception("generated-preview failed")
+        return JSONResponse(content={"success": False, "message": f"预览生成失败: {e}"})
+
+
 @app.get(path="/convert-pdf")
 async def http_convert_pdf(file_path: str = ""):
     """将 docx 转为 PDF（用 LibreOffice），保留原格式"""
