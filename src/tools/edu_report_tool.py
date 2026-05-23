@@ -17,6 +17,9 @@ from coze_coding_utils.runtime_ctx.context import new_context
 from storage.memory.memory_saver import get_memory_saver
 
 from tools.template_analyzer import analyze_template
+from tools.docx_validator import (
+    validate_docx, diff_docx, fix_docx, strip_inline_formatting, sanitize_fill_text,
+)
 
 
 # ── 模板注册表 ──
@@ -135,7 +138,9 @@ def _set_paragraph_text_preserve_runs(paragraph, text: str, rPr_source=None):
             target_run = paragraph.makeelement(qn("w:r"), {})
             paragraph.append(target_run)
 
-    effective_rpr = _get_first_run_rpr(paragraph) or rPr_source
+    effective_rpr = _get_first_run_rpr(paragraph)
+    if effective_rpr is None:
+        effective_rpr = rPr_source
     _ensure_run_text(target_run, text, effective_rpr)
 
     for run in runs:
@@ -165,25 +170,32 @@ def _append_paragraph_with_text(tc, text: str, rPr_source=None, pPr_source=None)
 
 def _set_tc_text(tc, text: str, rPr_source=None):
     """替换 tc 元素中的文本，尽量保留原模板的段落/run结构。"""
+    # 清理填入文本中的控制字符和不可见字符，防止XML注入
+    text = sanitize_fill_text(str(text))
+    
     paragraphs = tc.findall(qn("w:p"))
     if not paragraphs:
-        _append_paragraph_with_text(tc, str(text), rPr_source=rPr_source)
+        _append_paragraph_with_text(tc, text, rPr_source=rPr_source)
         return
 
-    lines = str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     if not lines:
         lines = [""]
 
     first_ppr = paragraphs[0].find(qn("w:pPr"))
     for idx, line in enumerate(lines):
         if idx < len(paragraphs):
-            effective_rpr = _get_first_run_rpr(paragraphs[idx]) or rPr_source
+            effective_rpr = _get_first_run_rpr(paragraphs[idx])
+            if effective_rpr is None:
+                effective_rpr = rPr_source
             _set_paragraph_text_preserve_runs(paragraphs[idx], line, effective_rpr)
         else:
             _append_paragraph_with_text(tc, line, rPr_source=rPr_source, pPr_source=first_ppr)
 
     for paragraph in paragraphs[len(lines):]:
-        effective_rpr = _get_first_run_rpr(paragraph) or rPr_source
+        effective_rpr = _get_first_run_rpr(paragraph)
+    if effective_rpr is None:
+        effective_rpr = rPr_source
         _set_paragraph_text_preserve_runs(paragraph, "", effective_rpr)
 
 
@@ -303,18 +315,19 @@ def _build_field_id_value_map(label_fields, data):
 
 
 def validate_doc(template_path: str, output_path: str) -> dict:
-    """对比模板和生成文档的结构完整性。
+    """对比模板和生成文档的结构完整性（增强版校验管线）。
 
-    检查项:
+    整合了 docx_validator 模块的多层校验：
     1. 生成文件能否被 python-docx 正常打开
-    2. 表格数量是否一致
-    3. 每张表的行数是否一致
-    4. 每张表的列数是否一致
+    2. OpenXML元素顺序校验（pPr→runs, rPr→t, tcPr→p, sectPr位置）
+    3. 单元格最少段落校验
+    4. 表格维度对比（数量、行数、列数）
+    5. 合并单元格连续性校验
+    6. 格式污染检测
+    7. 模板与填写文档对比（diff）
 
     Returns:
-        {"valid": bool, "errors": [...], "warnings": [...]}
-        errors → 阻断性错误（不应返回下载链接）
-        warnings → 警告（可返回下载链接但需提示）
+        {"valid": bool, "errors": [...], "warnings": [...], "diff": dict, "checks": list}
     """
     errors = []
     warnings = []
@@ -323,26 +336,31 @@ def validate_doc(template_path: str, output_path: str) -> dict:
     try:
         output_doc = Document(output_path)
     except Exception as e:
-        return {"valid": False, "errors": [f"生成的文档无法打开: {e}"], "warnings": []}
+        return {"valid": False, "errors": [f"生成的文档无法打开: {e}"], "warnings": [], "diff": None, "checks": []}
 
     try:
         template_doc = Document(template_path)
     except Exception as e:
         warnings.append(f"模板文件无法打开，跳过结构对比: {e}")
-        return {"valid": True, "errors": [], "warnings": warnings}
+        return {"valid": True, "errors": [], "warnings": warnings, "diff": None, "checks": []}
 
-    # 2. 表格数量
+    # 2. 运行校验管线（validate_docx）
+    validation = validate_docx(output_doc)
+
+    # 合并管线校验结果
+    errors.extend(validation["errors"])
+    warnings.extend(validation["warnings"])
+
+    # 3. 表格数量和维度对比
     t_tables = len(template_doc.tables)
     o_tables = len(output_doc.tables)
     if t_tables != o_tables:
         errors.append(f"表格数量变化: 模板{t_tables}个, 生成{o_tables}个")
 
-    # 3 & 4. 每张表的行数和列数
     for i in range(min(t_tables, o_tables)):
         t_rows = len(template_doc.tables[i].rows)
         o_rows = len(output_doc.tables[i].rows)
         if t_rows != o_rows:
-            # 行数增加可能是行组填充（合法），减少则是有问题
             if o_rows < t_rows:
                 errors.append(f"表格{i+1}行数减少: 模板{t_rows}行, 生成{o_rows}行")
             else:
@@ -353,7 +371,29 @@ def validate_doc(template_path: str, output_path: str) -> dict:
         if t_cols != o_cols:
             errors.append(f"表格{i+1}列数变化: 模板{t_cols}列, 生成{o_cols}列")
 
-    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
+    # 4. 生成diff对比
+    diff_result = None
+    try:
+        diff_result = diff_docx(template_path, output_path)
+    except Exception as e:
+        warnings.append(f"文档对比失败: {e}")
+
+    # 5. 如果有可自动修复的错误，尝试修复
+    if not validation["passed"]:
+        try:
+            fix_result = fix_docx(output_path)
+            if fix_result["fixed"]:
+                warnings.append(f"已自动修复 {len(fix_result['fixes'])} 个结构问题")
+        except Exception:
+            pass  # 修复失败不影响主流程
+
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "diff": diff_result,
+        "checks": validation["checks"],
+    }
 
 
 def _add_table_row_after(table, after_row_idx):
@@ -593,8 +633,8 @@ def _fill_paragraph_fields(doc, paragraph_fields, data):
                             is_underline = True
             
             if is_underline and not run.text.strip():
-                # 将下划线空白run替换为填入的值
-                run.text = f" {value} "
+                # 将下划线空白run替换为填入的值（清理控制字符）
+                run.text = f" {sanitize_fill_text(value)} "
                 break
 
 
@@ -1540,6 +1580,12 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         if not validation["valid"]:
             result["message"] = f"报告已生成，但存在结构问题: {'; '.join(validation['errors'])}"
 
+        # 附加diff摘要信息
+        if validation.get("diff"):
+            result["diff_summary"] = validation["diff"]["summary"]
+            result["diff_filled_count"] = len(validation["diff"]["filled"])
+            result["diff_still_empty_count"] = len(validation["diff"]["still_empty"])
+
         return json.dumps(result, ensure_ascii=False)
         
     except Exception as e:
@@ -1702,6 +1748,12 @@ def generate_from_template(file_path: str, report_data: str) -> str:
 
         if not validation["valid"]:
             result["message"] = f"文档已生成，但存在结构问题: {'; '.join(validation['errors'])}"
+
+        # 附加diff摘要信息
+        if validation.get("diff"):
+            result["diff_summary"] = validation["diff"]["summary"]
+            result["diff_filled_count"] = len(validation["diff"]["filled"])
+            result["diff_still_empty_count"] = len(validation["diff"]["still_empty"])
 
         return json.dumps(result, ensure_ascii=False)
         
