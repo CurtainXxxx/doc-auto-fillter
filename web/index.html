@@ -1452,10 +1452,6 @@ function startSelectFill() {}
 function triggerUpload() {
   document.getElementById('fileInput').click();
 }
-
-function triggerUpload() {
-  document.getElementById('fileInput').click();
-}
 async function handleFileUpload(event) {
   if (!UPLOAD_URL) { alert('请通过部署后的 Web 服务 URL 访问。'); return; }
   const files = Array.from(event.target.files);
