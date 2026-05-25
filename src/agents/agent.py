@@ -23,6 +23,7 @@ from tools.edu_report_tool import (
     analyze_uploaded_template, generate_from_template,
 )
 from tools.knowledge_tool import parse_knowledge_file, extract_facts
+from tools.prefill_tool import prefill_from_knowledge, prefill_from_multiple_knowledge
 
 LLM_CONFIG = "config/agent_llm_config.json"
 
@@ -151,7 +152,8 @@ def build_agent(ctx=None):
         model=llm,
         system_prompt=cfg.get("sp"),
         tools=[list_templates, analyze_report_template, generate_edu_report,
-               parse_knowledge_file, extract_facts, analyze_uploaded_template, generate_from_template],
+               parse_knowledge_file, extract_facts, analyze_uploaded_template, generate_from_template,
+               prefill_from_knowledge, prefill_from_multiple_knowledge],
         checkpointer=get_memory_saver(),
         state_schema=AgentState,
         middleware=[handle_tool_errors, sanitize_before_llm],

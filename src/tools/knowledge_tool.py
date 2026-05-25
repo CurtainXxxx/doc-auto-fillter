@@ -20,7 +20,7 @@ def _extract_text_from_file(file_path: str) -> str:
     """根据文件扩展名提取文本内容"""
     ext = os.path.splitext(file_path)[1].lower()
 
-    if ext == '.txt':
+    if ext == '.txt' or ext == '.md':
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             return f.read()
 

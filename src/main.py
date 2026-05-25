@@ -539,9 +539,16 @@ async def upload_file(files: list[UploadFile] = File(...)):
         try:
             result = extract_text_from_upload(tmp_path)
             result["filename"] = file.filename
+            result["file_path"] = tmp_path  # 保留临时文件路径供预填使用
             results.append(result)
-        finally:
-            os.unlink(tmp_path)
+        except Exception as e:
+            # 即使文本提取失败，也保留文件路径
+            results.append({
+                "success": False,
+                "filename": file.filename,
+                "error": str(e),
+                "file_path": tmp_path,
+            })
 
     if not results:
         raise HTTPException(status_code=400, detail="No valid files provided")
@@ -608,6 +615,62 @@ async def upload_template_file(file: UploadFile = File(...)):
         "extracted_text": extracted_text,
         "message": f"模板文件已上传：{file.filename}，请告诉Agent分析此模板"
     })
+
+
+@app.post("/prefill")
+async def prefill_template(request: Request):
+    """AI预填：从知识文件自动提取字段值，返回带置信度的预填结果。
+
+    请求体：
+    {
+        "file_paths": ["path/to/file1.docx", "path/to/file2.pdf"],
+        "template_path": "path/to/template.docx" 或 "评价报告"
+    }
+    """
+    try:
+        body = await request.json()
+        file_paths = body.get("file_paths", [])
+        template_path = body.get("template_path", "")
+
+        if not file_paths:
+            return JSONResponse(content={"success": False, "message": "未提供知识文件路径"})
+        if not template_path:
+            return JSONResponse(content={"success": False, "message": "未提供模板路径"})
+
+        # 解析模板路径
+        workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+        template_map = {
+            "评价报告": "2023-2024-2《xxx》 岭南师范学院专业课程目标达成度评价报告模板.docx",
+            "试卷分析": "2023-2024-2《xxx》 试卷分析模板.docx",
+            "关联矩阵": "2023-2024-2《xxx》岭南师范学院考题与课程目标及毕业要求关联矩阵表模板.docx",
+        }
+        if template_path in template_map:
+            full_template_path = os.path.join(workspace, "assets", template_map[template_path])
+        elif os.path.isabs(template_path):
+            full_template_path = template_path
+        else:
+            full_template_path = os.path.join(workspace, template_path)
+
+        if not os.path.exists(full_template_path):
+            return JSONResponse(content={"success": False, "message": f"模板文件不存在: {template_path}"})
+
+        # 解析知识文件路径
+        full_file_paths = []
+        for fp in file_paths:
+            if os.path.isabs(fp):
+                full_file_paths.append(fp)
+            else:
+                full_file_paths.append(os.path.join(workspace, fp))
+
+        # 调用预填工具
+        from tools.prefill_tool import prefill_from_file_paths
+        result = prefill_from_file_paths(full_file_paths, full_template_path)
+
+        return JSONResponse(content=result)
+
+    except Exception as e:
+        logger.exception("prefill failed")
+        return JSONResponse(content={"success": False, "message": f"预填失败: {e}"})
 
 
 @app.get("/template-preview")

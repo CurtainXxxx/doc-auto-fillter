@@ -194,8 +194,8 @@ def _set_tc_text(tc, text: str, rPr_source=None):
 
     for paragraph in paragraphs[len(lines):]:
         effective_rpr = _get_first_run_rpr(paragraph)
-    if effective_rpr is None:
-        effective_rpr = rPr_source
+        if effective_rpr is None:
+            effective_rpr = rPr_source
         _set_paragraph_text_preserve_runs(paragraph, "", effective_rpr)
 
 

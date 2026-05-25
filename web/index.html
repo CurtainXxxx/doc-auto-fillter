@@ -593,6 +593,131 @@ html, body {
   .preview-panel { height: 45vh; }
   .doc-page { padding: 24px 20px; }
 }
+
+/* ── Prefill Review Panel ── */
+.prefill-review {
+  padding: 20px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+.prefill-review .review-header {
+  margin-bottom: 16px;
+}
+.prefill-review .review-header h4 {
+  font-size: 15px; font-weight: 600; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+}
+.prefill-review .review-stats {
+  display: flex; gap: 12px; align-items: center; margin-bottom: 12px;
+}
+.prefill-review .stat-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500;
+}
+.prefill-review .stat-badge.confirmed { background: #ECFDF5; color: #059669; }
+.prefill-review .stat-badge.review { background: #FFFBEB; color: #D97706; }
+.prefill-review .stat-badge.empty { background: #F3F4F6; color: #6B7280; }
+.prefill-review .progress-bar-track {
+  height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden;
+}
+.prefill-review .progress-bar-fill {
+  height: 100%; border-radius: 3px; transition: width 0.4s ease;
+  background: linear-gradient(90deg, var(--success), #34D399);
+}
+
+.prefill-review .field-group {
+  margin-top: 14px;
+}
+.prefill-review .field-group-title {
+  font-size: 12px; font-weight: 600; color: var(--text-secondary);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  margin-bottom: 8px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-light);
+}
+.prefill-review .field-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; margin-bottom: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+  background: var(--surface);
+  transition: border-color 0.15s;
+}
+.prefill-review .field-card:hover {
+  border-color: var(--primary-light);
+}
+.prefill-review .field-card.confirmed { border-left: 3px solid #059669; }
+.prefill-review .field-card.review { border-left: 3px solid #D97706; }
+.prefill-review .field-card.empty { border-left: 3px solid #D1D5DB; }
+
+.prefill-review .field-label {
+  font-size: 13px; font-weight: 500; min-width: 100px; flex-shrink: 0;
+  color: var(--text);
+}
+.prefill-review .field-value {
+  flex: 1;
+}
+.prefill-review .field-value input,
+.prefill-review .field-value select {
+  width: 100%; padding: 4px 8px;
+  border: 1px solid var(--border); border-radius: 4px;
+  font-size: 13px; font-family: inherit;
+  background: var(--surface);
+}
+.prefill-review .field-value input:focus,
+.prefill-review .field-value select:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,0.1);
+}
+.prefill-review .field-value input.confirmed-input {
+  background: #F0FDF4; border-color: #A7F3D0;
+}
+.prefill-review .field-value input.review-input {
+  background: #FFFBEB; border-color: #FDE68A;
+}
+.prefill-review .field-value input.empty-input {
+  background: #F9FAFB; border-color: #E5E7EB;
+}
+.prefill-review .field-confidence {
+  font-size: 11px; color: var(--text-muted); white-space: nowrap; min-width: 40px; text-align: right;
+}
+.prefill-review .field-source {
+  font-size: 11px; color: var(--text-muted); white-space: nowrap;
+}
+
+.prefill-review .review-actions {
+  display: flex; gap: 10px; margin-top: 18px; padding-top: 14px;
+  border-top: 1px solid var(--border-light);
+}
+.prefill-review .review-actions button {
+  padding: 9px 20px; border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface);
+  transition: all 0.15s; font-family: inherit;
+}
+.prefill-review .review-actions button:hover {
+  border-color: var(--primary-light); color: var(--primary);
+}
+.prefill-review .review-actions button.primary {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+.prefill-review .review-actions button.primary:hover {
+  background: var(--primary-light);
+}
+.prefill-review .review-actions button:disabled {
+  background: #D1D5DB; color: #fff; border-color: #D1D5DB; cursor: not-allowed;
+}
+
+/* Prefill loading */
+.prefill-loading {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 60px 20px; gap: 16px;
+}
+.prefill-loading .spinner {
+  width: 32px; height: 32px;
+  border: 3px solid var(--border); border-top-color: var(--primary);
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+.prefill-loading p { font-size: 13px; color: var(--text-secondary); }
+
 </style>
 </head>
 <body>
@@ -627,9 +752,9 @@ html, body {
           <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg></span>
           <span class="func-text"><span class="title">上传模板</span><span class="desc">上传docx自动识别</span></span>
         </button>
-        <button class="func-btn" id="funcCoFill" onclick="startCoFill()" style="opacity:0.4;cursor:not-allowed;" title="开发中">
+        <button class="func-btn" id="funcCoFill" onclick="startCoFill()">
           <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-          <span class="func-text"><span class="title">人机协同填写</span><span class="desc">人工填写智能补全</span></span>
+          <span class="func-text"><span class="title">人机协同填写</span><span class="desc">AI预填+人工审核</span></span>
         </button>
         <button class="func-btn" id="funcUpload" onclick="triggerUpload()">
           <span class="func-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></span>
@@ -1445,7 +1570,292 @@ async function handleTemplateUpload(event) {
 }
 
 function startSelectFill() {}
-function startCoFill() {}
+
+// ── Prefill review state ──
+let prefillData = null;      // 预填结果数据
+let prefillMode = false;     // 是否在协同填写模式
+
+async function startCoFill() {
+  if (isStreaming) return;
+  currentMode = 'cofill';
+  prefillMode = true;
+  document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('funcCoFill').classList.add('active');
+
+  // Step 1: 选择模板
+  if (!currentTemplate && !currentTemplatePath) {
+    appendMessage('user', '启动人机协同填写模式');
+    appendMessage('assistant',
+      '📋 **人机协同填写模式**\n\n' +
+      '流程：上传模板 → 上传知识文件 → AI预填 → 您审核修正 → 一键生成\n\n' +
+      '请先选择模板：\n' +
+      '· 点击「内置模板」选择预设模板\n' +
+      '· 或点击「上传模板」上传Word文件\n\n' +
+      '选好模板后，请上传知识文件（教学大纲、成绩单等），AI将自动提取信息并预填。'
+    );
+  } else if (!prefillData) {
+    // 已有模板，提示上传知识文件
+    appendMessage('user', '继续协同填写');
+    appendMessage('assistant',
+      '✅ 模板已就绪\n\n' +
+      '请上传知识文件（教学大纲、成绩单、课程计划等），AI将自动提取信息并预填。\n' +
+      '支持多文件上传，可一次选择多个文件。\n\n' +
+      '点击下方 📎 按钮上传文件，或直接输入信息。'
+    );
+  } else {
+    // 已有预填数据，展示审核界面
+    renderPrefillReview(prefillData);
+  }
+}
+
+async function requestPrefill(filePaths) {
+  /** 调用 /prefill API 获取预填结果 */
+  if (!currentTemplate && !currentTemplatePath) {
+    appendMessage('assistant', '⚠ 请先选择模板（内置模板或上传模板），然后再上传知识文件进行预填。');
+    return;
+  }
+
+  const templatePath = currentTemplatePath || currentTemplate;
+  if (!templatePath) {
+    appendMessage('assistant', '⚠ 未检测到模板，请先选择模板。');
+    return;
+  }
+
+  // 在预览区显示加载动画
+  const previewBody = document.getElementById('previewBody');
+  previewBody.innerHTML = `
+    <div class="prefill-loading">
+      <div class="spinner"></div>
+      <p>🤖 AI正在从知识文件中提取字段值...</p>
+      <p style="font-size:12px;color:var(--text-muted);">这可能需要10-30秒</p>
+    </div>`;
+
+  try {
+    const resp = await fetch(BASE_URL + '/prefill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_paths: filePaths,
+        template_path: templatePath,
+      }),
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const result = await resp.json();
+
+    if (result.success) {
+      prefillData = result;
+      renderPrefillReview(result);
+
+      // 同时通知Agent
+      const summary = result.summary || `AI预填完成，预填率 ${result.fill_rate_pct}%`;
+      appendMessage('assistant', `✅ ${summary}\n\n请在右侧审核面板中确认或修正预填结果，确认后点击「确认并生成」。`);
+    } else {
+      appendMessage('assistant', `⚠ 预填失败：${result.message || '未知错误'}。您可以继续通过对话提供信息。`);
+      // 恢复预览
+      if (docPreviewHtml) {
+        previewBody.innerHTML = docPreviewHtml;
+      }
+    }
+  } catch (err) {
+    appendMessage('assistant', `⚠ 预填请求失败：${escapeHtml(err.message)}。您可以继续通过对话提供信息。`);
+    if (docPreviewHtml) {
+      previewBody.innerHTML = docPreviewHtml;
+    }
+  }
+}
+
+function renderPrefillReview(data) {
+  /** 渲染预填审核界面到预览区 */
+  const previewBody = document.getElementById('previewBody');
+  const fields = data.fields || [];
+
+  // 分组
+  const confirmed = fields.filter(f => f.status === 'confirmed');
+  const review = fields.filter(f => f.status === 'review');
+  const empty = fields.filter(f => f.status === 'empty');
+  const total = fields.length;
+  const filled = confirmed.length + review.length;
+  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+
+  let html = `<div class="prefill-review">`;
+  html += `<div class="review-header">
+    <h4>📋 AI预填审核</h4>
+    <div class="review-stats">
+      <span class="stat-badge confirmed">✅ 已确认 ${confirmed.length}</span>
+      <span class="stat-badge review">⚠️ 需审核 ${review.length}</span>
+      <span class="stat-badge empty">⬜ 未填写 ${empty.length}</span>
+    </div>
+    <div class="progress-bar-track">
+      <div class="progress-bar-fill" style="width:${pct}%"></div>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">预填率 ${pct}%（${filled}/${total}）</div>
+  </div>`;
+
+  // 需审核字段
+  if (review.length > 0) {
+    html += `<div class="field-group">
+      <div class="field-group-title">⚠️ 需要审核（${review.length}）</div>`;
+    for (const f of review) {
+      html += renderFieldCard(f, 'review');
+    }
+    html += `</div>`;
+  }
+
+  // 未填写字段
+  if (empty.length > 0) {
+    html += `<div class="field-group">
+      <div class="field-group-title">⬜ 需要填写（${empty.length}）</div>`;
+    for (const f of empty) {
+      html += renderFieldCard(f, 'empty');
+    }
+    html += `</div>`;
+  }
+
+  // 已确认字段（折叠）
+  if (confirmed.length > 0) {
+    html += `<div class="field-group">
+      <div class="field-group-title" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        ✅ 已确认（${confirmed.length}） ▾ 点击展开
+      </div>
+      <div style="display:none">`;
+    for (const f of confirmed) {
+      html += renderFieldCard(f, 'confirmed');
+    }
+    html += `</div></div>`;
+  }
+
+  // 操作按钮
+  html += `<div class="review-actions">
+    <button class="primary" onclick="submitPrefillReview()">确认并生成</button>
+    <button onclick="sendPrefillToAgent()">交给AI继续填写</button>
+    <button onclick="cancelPrefillReview()">取消</button>
+  </div>`;
+
+  html += `</div>`;
+  previewBody.innerHTML = html;
+}
+
+function renderFieldCard(field, status) {
+  const value = field.value || '';
+  const confidence = field.confidence || 0;
+  const source = field.source || '';
+  const inputClass = status === 'confirmed' ? 'confirmed-input' : status === 'review' ? 'review-input' : 'empty-input';
+
+  return `<div class="field-card ${status}">
+    <div class="field-label">${escapeHtml(field.label)}</div>
+    <div class="field-value">
+      <input type="text" class="${inputClass}"
+        data-field-id="${escapeAttr(field.field_id)}"
+        data-label="${escapeAttr(field.label)}"
+        value="${escapeAttr(value)}"
+        placeholder="${status === 'empty' ? '请输入...' : ''}"
+        onchange="onPrefillFieldChange(this)"
+      />
+    </div>
+    <div class="field-confidence">${confidence > 0 ? Math.round(confidence * 100) + '%' : ''}</div>
+    ${source ? `<div class="field-source" title="${escapeAttr(source)}">📍</div>` : ''}
+  </div>`;
+}
+
+function onPrefillFieldChange(input) {
+  /** 字段值被修改时更新状态 */
+  const card = input.closest('.field-card');
+  if (input.value.trim()) {
+    card.classList.remove('empty', 'review');
+    card.classList.add('confirmed');
+    input.classList.remove('empty-input', 'review-input');
+    input.classList.add('confirmed-input');
+  }
+  // 更新prefillData中对应的字段
+  if (prefillData && prefillData.fields) {
+    const fid = input.dataset.fieldId;
+    const f = prefillData.fields.find(f => f.field_id === fid);
+    if (f) {
+      f.value = input.value;
+      f.status = input.value.trim() ? 'confirmed' : 'empty';
+      f.confidence = 1.0;
+      f.source = '用户填写';
+    }
+  }
+}
+
+async function submitPrefillReview() {
+  /** 确认预填结果并生成文档 */
+  if (!prefillData) return;
+
+  // 收集所有字段的最终值
+  const finalData = {};
+  const allInputs = document.querySelectorAll('.prefill-review input[data-field-id]');
+  allInputs.forEach(input => {
+    const label = input.dataset.label;
+    const value = input.value.trim();
+    if (value) {
+      finalData[label] = value;
+    }
+  });
+
+  if (Object.keys(finalData).length === 0) {
+    alert('请至少填写一个字段');
+    return;
+  }
+
+  // 构造 [FIELDS] 格式发送给Agent
+  let fieldsBlock = '[FIELDS]\n';
+  for (const [label, value] of Object.entries(finalData)) {
+    fieldsBlock += `${label}=${value}\n`;
+  }
+  fieldsBlock += '[/FIELDS]';
+
+  const agentMsg = `我已经审核了AI预填结果，以下是最终确认的字段值：\n\n${fieldsBlock}\n\n请根据这些信息生成文档。所有已填字段都已确认，无需再追问。`;
+
+  // 退出审核模式
+  prefillMode = false;
+  prefillData = null;
+
+  // 发送给Agent
+  appendMessage('user', '确认预填结果，生成文档');
+  await callAgent(agentMsg);
+}
+
+async function sendPrefillToAgent() {
+  /** 将预填结果发给Agent继续交互式填写 */
+  if (!prefillData) return;
+
+  const fields = prefillData.fields || [];
+  const filled = fields.filter(f => f.value && f.status !== 'empty');
+  const empty = fields.filter(f => !f.value || f.status === 'empty');
+
+  let msg = `AI预填结果如下，已填字段请直接使用，未填字段请继续追问：\n\n[FIELDS]\n`;
+  for (const f of filled) {
+    msg += `${f.label}=${f.value}\n`;
+  }
+  msg += `[/FIELDS]\n\n`;
+  msg += `还需填写：${empty.map(f => f.label).join('、')}`;
+
+  prefillMode = false;
+  prefillData = null;
+
+  appendMessage('user', '将预填结果交给AI继续');
+  await callAgent(msg);
+}
+
+function cancelPrefillReview() {
+  /** 取消审核，恢复预览 */
+  prefillMode = false;
+  prefillData = null;
+  const previewBody = document.getElementById('previewBody');
+  if (docPreviewHtml) {
+    previewBody.innerHTML = docPreviewHtml;
+  } else {
+    previewBody.innerHTML = `<div class="empty-state">
+      <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div>
+      <h4>文档预览区</h4>
+      <p>选择模板后，原始文档将在此显示。</p>
+    </div>`;
+  }
+}
+
 
 function triggerUpload() {
   document.getElementById('fileInput').click();
@@ -1481,7 +1891,16 @@ async function handleFileUpload(event) {
 
     // 处理多文件响应
     if (result.multiple && result.files) {
-      // 多文件模式：合并所有文件内容
+      // 收集成功上传的文件路径
+      const uploadedPaths = result.files.filter(f => f.success).map(f => f.file_path).filter(Boolean);
+
+      // 人机协同模式：调用预填API
+      if (prefillMode && uploadedPaths.length > 0) {
+        await requestPrefill(uploadedPaths);
+        return;
+      }
+
+      // 普通模式：合并所有文件内容发给Agent
       const fileParts = [];
       for (const f of result.files) {
         if (f.success && f.extracted_text) {
@@ -1498,6 +1917,14 @@ async function handleFileUpload(event) {
       }
     } else {
       // 单文件模式（向后兼容）
+      const uploadedPath = result.file_path;
+
+      // 人机协同模式：调用预填API
+      if (prefillMode && uploadedPath) {
+        await requestPrefill([uploadedPath]);
+        return;
+      }
+
       if (result.success && result.extracted_text) {
         const agentMsg = `我上传了文件"${result.filename}"，以下是文件内容，请从中提取填写文档所需的信息：\n\n${result.extracted_text.substring(0, 3000)}`;
         await callAgent(agentMsg);
