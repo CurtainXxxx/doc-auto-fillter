@@ -706,7 +706,187 @@ html, body {
   background: #D1D5DB; color: #fff; border-color: #D1D5DB; cursor: not-allowed;
 }
 
-/* Prefill loading */
+/* ============= 人机协同全屏审核模式 ============= */
+.app.cofill-mode .chat-panel { display: none; }
+.app.cofill-mode .preview-panel { display: none; }
+.app.cofill-mode .cofill-view { display: flex; }
+
+.cofill-view {
+  display: none; width: 100%; height: 100vh;
+  flex-direction: column; background: var(--bg);
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000;
+}
+.cofill-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.cofill-header .left { display: flex; align-items: center; gap: 12px; }
+.cofill-header .mode-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
+  padding: 4px 14px; border-radius: 20px; font-size: 13px; font-weight: 600;
+}
+.cofill-header .step-text { font-size: 13px; color: var(--text-secondary); }
+.cofill-header .exit-btn {
+  background: none; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 16px; font-size: 13px; cursor: pointer; color: var(--text-secondary);
+  transition: all 0.15s;
+}
+.cofill-header .exit-btn:hover { border-color: #ef4444; color: #ef4444; }
+
+.cofill-body { display: flex; flex: 1; overflow: hidden; }
+
+/* 左侧：字段审核面板 */
+.cofill-fields {
+  width: 420px; min-width: 340px; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; background: #fafbfc;
+}
+.cofill-fields-header {
+  padding: 16px 20px 12px; border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+.cofill-fields-header h3 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
+.cofill-progress {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+}
+.cofill-progress .bar-track {
+  flex: 1; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;
+}
+.cofill-progress .bar-fill {
+  height: 100%; border-radius: 4px; transition: width 0.3s;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+.cofill-progress .pct { font-size: 13px; font-weight: 600; color: #16a34a; min-width: 40px; text-align: right; }
+.cofill-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.cofill-badges .badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500;
+}
+.cofill-badges .badge.green { background: #dcfce7; color: #15803d; }
+.cofill-badges .badge.yellow { background: #fef9c3; color: #a16207; }
+.cofill-badges .badge.gray { background: #f3f4f6; color: #6b7280; }
+
+.cofill-fields-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+.cofill-field-group-title {
+  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--text-secondary); margin: 12px 0 8px; padding: 0 4px;
+}
+
+.cofill-field-card {
+  background: #fff; border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 14px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.cofill-field-card:hover { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(99,102,241,0.08); }
+.cofill-field-card.confirmed { border-left: 3px solid #22c55e; }
+.cofill-field-card.review { border-left: 3px solid #f59e0b; }
+.cofill-field-card.empty { border-left: 3px solid #d1d5db; }
+
+.cofill-field-card .dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.cofill-field-card.confirmed .dot { background: #22c55e; }
+.cofill-field-card.review .dot { background: #f59e0b; }
+.cofill-field-card.empty .dot { background: #d1d5db; }
+
+.cofill-field-card .field-body { flex: 1; min-width: 0; }
+.cofill-field-card .field-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+.cofill-field-card .field-label .source-tag {
+  font-size: 10px; background: #f0f0f0; padding: 1px 6px; border-radius: 3px;
+  margin-left: 6px; color: #888;
+}
+.cofill-field-card input {
+  width: 100%; border: 1px solid var(--border); border-radius: 4px;
+  padding: 5px 8px; font-size: 13px; outline: none;
+  transition: border-color 0.15s;
+}
+.cofill-field-card input:focus { border-color: var(--primary); }
+.cofill-field-card.confirmed input { background: #f0fdf4; }
+.cofill-field-card.review input { background: #fffbeb; }
+.cofill-field-card.empty input { background: #f9fafb; color: var(--text-secondary); }
+
+.cofill-field-card .conf-badge {
+  font-size: 10px; padding: 1px 6px; border-radius: 3px;
+  white-space: nowrap; flex-shrink: 0;
+}
+.cofill-field-card.confirmed .conf-badge { background: #dcfce7; color: #15803d; }
+.cofill-field-card.review .conf-badge { background: #fef9c3; color: #a16207; }
+
+/* 底部操作栏 */
+.cofill-footer {
+  padding: 14px 20px; border-top: 1px solid var(--border);
+  background: #fff; display: flex; gap: 10px; align-items: center;
+}
+.cofill-footer .spacer { flex: 1; }
+.cofill-footer button {
+  padding: 8px 20px; border-radius: 6px; font-size: 13px; font-weight: 500;
+  border: 1px solid var(--border); background: #fff; cursor: pointer;
+  transition: all 0.15s;
+}
+.cofill-footer button:hover { background: #f9fafb; }
+.cofill-footer button.primary-btn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff;
+  border: none; box-shadow: 0 2px 8px rgba(99,102,241,0.3);
+}
+.cofill-footer button.primary-btn:hover { box-shadow: 0 4px 12px rgba(99,102,241,0.4); }
+.cofill-footer button.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 右侧：文档预览 */
+.cofill-preview {
+  flex: 1; display: flex; flex-direction: column; background: #e5e7eb;
+}
+.cofill-preview-header {
+  padding: 10px 20px; background: #fff; border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 8px;
+}
+.cofill-preview-body {
+  flex: 1; overflow: auto; padding: 20px;
+  display: flex; justify-content: center;
+}
+.cofill-preview-body .doc-container {
+  background: #fff; box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+  max-width: 800px; width: 100%; min-height: 600px; padding: 30px;
+}
+
+/* 协同模式 - 步骤引导 */
+.cofill-step-guide {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 60px 40px; text-align: center; height: 100%;
+}
+.cofill-step-guide .step-icon {
+  width: 80px; height: 80px; border-radius: 50%; background: #f0f0ff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px; margin-bottom: 20px;
+}
+.cofill-step-guide h3 { font-size: 18px; margin: 0 0 8px; color: var(--text-primary); }
+.cofill-step-guide p { font-size: 14px; color: var(--text-secondary); max-width: 400px; line-height: 1.6; }
+.cofill-step-guide .step-actions { margin-top: 24px; display: flex; gap: 12px; }
+.cofill-step-guide .step-actions button {
+  padding: 10px 24px; border-radius: 8px; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: 1px solid var(--border); background: #fff;
+  transition: all 0.15s;
+}
+.cofill-step-guide .step-actions button:hover { background: #f5f5ff; border-color: var(--primary); }
+.cofill-step-guide .step-actions button.primary {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6); color: #fff; border: none;
+}
+
+/* 加载态 */
+.cofill-loading {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 60px 20px; gap: 16px; height: 100%;
+}
+.cofill-loading .spinner {
+  width: 40px; height: 40px;
+  border: 3px solid #e5e7eb; border-top-color: #6366f1;
+  border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+.cofill-loading p { font-size: 14px; color: var(--text-secondary); }
+.cofill-loading .sub { font-size: 12px; color: #9ca3af; }
+
+/* Prefill loading - legacy (keep for backward compat) */
 .prefill-loading {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 60px 20px; gap: 16px;
@@ -794,6 +974,52 @@ html, body {
       </div>
     </div>
   </div>
+
+  <!-- 人机协同填写 - 全屏审核视图 -->
+  <div class="cofill-view" id="cofillView">
+    <div class="cofill-header">
+      <div class="left">
+        <span class="mode-badge">🤝 人机协同</span>
+        <span class="step-text" id="cofillStepText">选择模板</span>
+      </div>
+      <button class="exit-btn" onclick="exitCoFill()">✕ 退出协同模式</button>
+    </div>
+    <div class="cofill-body">
+      <!-- 左侧：字段审核面板 -->
+      <div class="cofill-fields" id="cofillFields">
+        <div class="cofill-fields-header">
+          <h3 id="cofillFieldsTitle">字段审核</h3>
+          <div class="cofill-progress" id="cofillProgress" style="display:none">
+            <div class="bar-track"><div class="bar-fill" id="cofillBarFill" style="width:0%"></div></div>
+            <span class="pct" id="cofillPct">0%</span>
+          </div>
+          <div class="cofill-badges" id="cofillBadges" style="display:none"></div>
+        </div>
+        <div class="cofill-fields-body" id="cofillFieldsBody">
+          <!-- 动态填充：步骤引导 / 字段卡片 -->
+        </div>
+        <div class="cofill-footer" id="cofillFooter" style="display:none">
+          <button onclick="exitCoFill()">取消</button>
+          <button onclick="sendPrefillToAgent()">交给AI继续</button>
+          <div class="spacer"></div>
+          <button class="primary-btn" id="cofillSubmitBtn" onclick="submitPrefillReview()">确认并生成</button>
+        </div>
+      </div>
+      <!-- 右侧：文档预览 -->
+      <div class="cofill-preview">
+        <div class="cofill-preview-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>
+          <span id="cofillPreviewTitle">文档预览</span>
+        </div>
+        <div class="cofill-preview-body" id="cofillPreviewBody">
+          <div class="doc-container" id="cofillDocContainer">
+            <!-- 动态填充 -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1358,6 +1584,12 @@ function renderDocPreview() {
   html += `</div>`;
 
   body.innerHTML = html;
+
+  // 同步更新协同模式的预览
+  if (prefillMode) {
+    const cofillContainer = document.getElementById('cofillDocContainer');
+    if (cofillContainer) cofillContainer.innerHTML = html;
+  }
   previewRendered = true;
 }
 
@@ -1504,7 +1736,13 @@ async function selectTemplate(name) {
   currentTemplate = name;
   currentTemplatePath = name;  // 后端支持模板名作为 path
   await fetchDocPreview(name);
-  sendMessage(name);
+
+  if (prefillMode) {
+    // 协同模式：模板选好后进入步骤2
+    showCoFillStep('upload-knowledge');
+  } else {
+    sendMessage(name);
+  }
 }
 
 // ── Function 1: Built-in Templates ──
@@ -1536,8 +1774,10 @@ async function handleTemplateUpload(event) {
   const sizeStr = file.size < 1024*1024 ? (file.size/1024).toFixed(1)+'KB' : (file.size/1024/1024).toFixed(1)+'MB';
   appendMessage('user', `上传了模板文件: ${file.name}（${sizeStr}）`);
 
-  document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
-  document.getElementById('funcUploadTpl').classList.add('active');
+  if (!prefillMode) {
+    document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('funcUploadTpl').classList.add('active');
+  }
 
   const formData = new FormData();
   formData.append('file', file);
@@ -1554,12 +1794,18 @@ async function handleTemplateUpload(event) {
       // 获取文档预览
       await fetchDocPreview(templatePath);
 
-      if (result.extracted_text) {
-        const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_uploaded_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
-        await callAgent(agentMsg);
-      } else if (templatePath) {
-        const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}，请用analyze_uploaded_template工具分析这个模板，识别出所有需要填写的字段。`;
-        await callAgent(agentMsg);
+      if (prefillMode) {
+        // 协同模式：模板选好后进入步骤2
+        showCoFillStep('upload-knowledge');
+      } else {
+        // 普通模式：交给Agent分析
+        if (result.extracted_text) {
+          const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}。请先用analyze_uploaded_template工具分析这个模板路径，识别出所有需要填写的字段。如果工具调用失败，以下是文件内容作为参考：\n\n${result.extracted_text.substring(0, 5000)}`;
+          await callAgent(agentMsg);
+        } else if (templatePath) {
+          const agentMsg = `我上传了一个Word模板文件"${file.name}"，模板路径：${templatePath}，请用analyze_uploaded_template工具分析这个模板，识别出所有需要填写的字段。`;
+          await callAgent(agentMsg);
+        }
       }
     } else {
       appendMessage('assistant', `模板解析失败：${result.error || '未知错误'}，请确保上传的是.docx格式的Word文件。`);
@@ -1582,53 +1828,182 @@ async function startCoFill() {
   document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('funcCoFill').classList.add('active');
 
-  // Step 1: 选择模板
+  // 进入全屏协同视图
+  document.querySelector('.app').classList.add('cofill-mode');
+
   if (!currentTemplate && !currentTemplatePath) {
-    appendMessage('user', '启动人机协同填写模式');
-    appendMessage('assistant',
-      '📋 **人机协同填写模式**\n\n' +
-      '流程：上传模板 → 上传知识文件 → AI预填 → 您审核修正 → 一键生成\n\n' +
-      '请先选择模板：\n' +
-      '· 点击「内置模板」选择预设模板\n' +
-      '· 或点击「上传模板」上传Word文件\n\n' +
-      '选好模板后，请上传知识文件（教学大纲、成绩单等），AI将自动提取信息并预填。'
-    );
-  } else if (!prefillData) {
-    // 已有模板，提示上传知识文件
-    appendMessage('user', '继续协同填写');
-    appendMessage('assistant',
-      '✅ 模板已就绪\n\n' +
-      '请上传知识文件（教学大纲、成绩单、课程计划等），AI将自动提取信息并预填。\n' +
-      '支持多文件上传，可一次选择多个文件。\n\n' +
-      '点击下方 📎 按钮上传文件，或直接输入信息。'
-    );
+    // 步骤1：选择模板
+    showCoFillStep('select-template');
   } else {
-    // 已有预填数据，展示审核界面
-    renderPrefillReview(prefillData);
+    // 已有模板，进入步骤2：上传知识文件
+    showCoFillStep('upload-knowledge');
+  }
+}
+
+function showCoFillStep(step) {
+  const body = document.getElementById('cofillFieldsBody');
+  const footer = document.getElementById('cofillFooter');
+  const stepText = document.getElementById('cofillStepText');
+  const previewBody = document.getElementById('cofillDocContainer');
+
+  switch (step) {
+    case 'select-template':
+      stepText.textContent = '步骤 1/3：选择模板';
+      footer.style.display = 'none';
+      body.innerHTML = `
+        <div class="cofill-step-guide">
+          <div class="step-icon">📄</div>
+          <h3>选择文档模板</h3>
+          <p>请选择要填写的教务文档模板，支持内置模板或上传自定义Word模板</p>
+          <div class="step-actions">
+            <button onclick="cofillSelectBuiltIn()">📋 选择内置模板</button>
+            <button class="primary" onclick="cofillUploadTemplate()">📤 上传自定义模板</button>
+          </div>
+        </div>`;
+      previewBody.innerHTML = `<div class="cofill-step-guide"><div class="step-icon">👀</div><h3>模板预览</h3><p>选择模板后，文档预览将在此显示</p></div>`;
+      break;
+
+    case 'upload-knowledge':
+      stepText.textContent = '步骤 2/3：上传知识文件';
+      footer.style.display = 'none';
+      body.innerHTML = `
+        <div class="cofill-step-guide">
+          <div class="step-icon">📚</div>
+          <h3>上传知识文件</h3>
+          <p>上传教学大纲、成绩单、课程计划等文件，AI将自动提取信息并预填到模板字段中</p>
+          <div style="font-size:12px;color:#888;margin-top:4px">支持 .docx .txt .pdf .csv，可多选</div>
+          <div class="step-actions">
+            <button class="primary" onclick="triggerUpload()">📎 选择知识文件</button>
+            <button onclick="cofillSkipKnowledge()">跳过，手动填写</button>
+          </div>
+        </div>`;
+      // 在右侧显示模板预览
+      if (docPreviewHtml) {
+        previewBody.innerHTML = docPreviewHtml;
+      }
+      break;
+
+    case 'prefilling':
+      stepText.textContent = '步骤 2/3：AI提取中...';
+      footer.style.display = 'none';
+      body.innerHTML = `
+        <div class="cofill-loading">
+          <div class="spinner"></div>
+          <p>🤖 AI正在从知识文件中提取字段值...</p>
+          <div class="sub">这可能需要10-30秒</div>
+        </div>`;
+      break;
+
+    case 'review':
+      stepText.textContent = '步骤 3/3：审核确认';
+      footer.style.display = 'flex';
+      renderCoFillReview();
+      break;
+
+    case 'manual':
+      stepText.textContent = '步骤 3/3：手动填写';
+      footer.style.display = 'flex';
+      renderCoFillManual();
+      break;
+  }
+}
+
+function cofillSelectBuiltIn() {
+  // 在左侧面板展示内置模板选择
+  const body = document.getElementById('cofillFieldsBody');
+  body.innerHTML = `
+    <div style="padding:12px 0">
+      <div class="cofill-field-group-title">内置模板</div>
+      <div class="cofill-field-card confirmed" style="cursor:pointer" onclick="cofillPickTemplate('评价报告')">
+        <div class="dot"></div>
+        <div class="field-body">
+          <div class="field-label">📊 课程目标达成度评价报告</div>
+          <div style="font-size:12px;color:#888">93个字段 · 含课程目标、成绩统计等</div>
+        </div>
+      </div>
+      <div class="cofill-field-card confirmed" style="cursor:pointer" onclick="cofillPickTemplate('试卷分析')">
+        <div class="dot"></div>
+        <div class="field-body">
+          <div class="field-label">📝 试卷分析报告</div>
+          <div style="font-size:12px;color:#888">20个字段 · 含考勤、成绩分布等</div>
+        </div>
+      </div>
+      <div class="cofill-field-card confirmed" style="cursor:pointer" onclick="cofillPickTemplate('关联矩阵')">
+        <div class="dot"></div>
+        <div class="field-body">
+          <div class="field-label">🔗 考题与课程目标关联矩阵</div>
+          <div style="font-size:12px;color:#888">含课程目标、考题对应关系等</div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function cofillPickTemplate(name) {
+  currentTemplate = name;
+  currentTemplatePath = name;
+
+  // 显示加载
+  const body = document.getElementById('cofillFieldsBody');
+  body.innerHTML = `<div class="cofill-loading"><div class="spinner"></div><p>正在分析模板字段...</p></div>`;
+
+  // 获取文档预览
+  await fetchDocPreview(name);
+
+  // 调用分析API获取字段列表
+  try {
+    const resp = await fetch(BASE_URL + '/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: `请使用analyze_report_template工具分析"${name}"模板，返回所有可填写字段。`,
+        session_id: sessionId,
+      }),
+    });
+    // 这里不等待完整响应，直接进入步骤2
+  } catch (e) {
+    // 忽略错误，进入步骤2即可
+  }
+
+  // 存储分析结果到 window._lastAnalyzedFields 以便手动填写模式使用
+  // 模板选好后进入步骤2
+  showCoFillStep('upload-knowledge');
+}
+
+function cofillUploadTemplate() {
+  document.getElementById('templateFileInput').click();
+}
+
+function cofillSkipKnowledge() {
+  // 跳过知识文件，直接进入手动填写
+  showCoFillStep('manual');
+}
+
+function exitCoFill() {
+  document.querySelector('.app').classList.remove('cofill-mode');
+  prefillMode = false;
+  prefillData = null;
+  document.querySelectorAll('.func-btn').forEach(b => b.classList.remove('active'));
+  // 恢复预览
+  if (docPreviewHtml) {
+    document.getElementById('previewBody').innerHTML = docPreviewHtml;
   }
 }
 
 async function requestPrefill(filePaths) {
   /** 调用 /prefill API 获取预填结果 */
   if (!currentTemplate && !currentTemplatePath) {
-    appendMessage('assistant', '⚠ 请先选择模板（内置模板或上传模板），然后再上传知识文件进行预填。');
+    alert('请先选择模板');
     return;
   }
 
   const templatePath = currentTemplatePath || currentTemplate;
   if (!templatePath) {
-    appendMessage('assistant', '⚠ 未检测到模板，请先选择模板。');
+    alert('未检测到模板，请先选择模板。');
     return;
   }
 
-  // 在预览区显示加载动画
-  const previewBody = document.getElementById('previewBody');
-  previewBody.innerHTML = `
-    <div class="prefill-loading">
-      <div class="spinner"></div>
-      <p>🤖 AI正在从知识文件中提取字段值...</p>
-      <p style="font-size:12px;color:var(--text-muted);">这可能需要10-30秒</p>
-    </div>`;
+  // 显示加载态
+  showCoFillStep('prefilling');
 
   try {
     const resp = await fetch(BASE_URL + '/prefill', {
@@ -1645,30 +2020,24 @@ async function requestPrefill(filePaths) {
 
     if (result.success) {
       prefillData = result;
-      renderPrefillReview(result);
-
-      // 同时通知Agent
-      const summary = result.summary || `AI预填完成，预填率 ${result.fill_rate_pct}%`;
-      appendMessage('assistant', `✅ ${summary}\n\n请在右侧审核面板中确认或修正预填结果，确认后点击「确认并生成」。`);
+      showCoFillStep('review');
+      // 在聊天窗口也通知一下
+      appendMessage('user', '已上传知识文件，AI正在提取预填');
+      appendMessage('assistant', `✅ ${result.summary || 'AI预填完成'}\n\n请在左侧审核面板中确认或修正预填结果，确认后点击「确认并生成」。`);
     } else {
-      appendMessage('assistant', `⚠ 预填失败：${result.message || '未知错误'}。您可以继续通过对话提供信息。`);
-      // 恢复预览
-      if (docPreviewHtml) {
-        previewBody.innerHTML = docPreviewHtml;
-      }
+      alert(`预填失败：${result.message || '未知错误'}，将进入手动填写模式`);
+      showCoFillStep('manual');
     }
   } catch (err) {
-    appendMessage('assistant', `⚠ 预填请求失败：${escapeHtml(err.message)}。您可以继续通过对话提供信息。`);
-    if (docPreviewHtml) {
-      previewBody.innerHTML = docPreviewHtml;
-    }
+    alert(`预填请求失败：${err.message}，将进入手动填写模式`);
+    showCoFillStep('manual');
   }
 }
 
-function renderPrefillReview(data) {
-  /** 渲染预填审核界面到预览区 */
-  const previewBody = document.getElementById('previewBody');
-  const fields = data.fields || [];
+function renderCoFillReview() {
+  /** 在协同视图左侧渲染预填审核字段卡片 */
+  const body = document.getElementById('cofillFieldsBody');
+  const fields = prefillData.fields || [];
 
   // 分组
   const confirmed = fields.filter(f => f.status === 'confirmed');
@@ -1678,106 +2047,192 @@ function renderPrefillReview(data) {
   const filled = confirmed.length + review.length;
   const pct = total > 0 ? Math.round(filled / total * 100) : 0;
 
-  let html = `<div class="prefill-review">`;
-  html += `<div class="review-header">
-    <h4>📋 AI预填审核</h4>
-    <div class="review-stats">
-      <span class="stat-badge confirmed">✅ 已确认 ${confirmed.length}</span>
-      <span class="stat-badge review">⚠️ 需审核 ${review.length}</span>
-      <span class="stat-badge empty">⬜ 未填写 ${empty.length}</span>
-    </div>
-    <div class="progress-bar-track">
-      <div class="progress-bar-fill" style="width:${pct}%"></div>
-    </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">预填率 ${pct}%（${filled}/${total}）</div>
-  </div>`;
+  // 更新进度
+  document.getElementById('cofillProgress').style.display = 'flex';
+  document.getElementById('cofillBarFill').style.width = pct + '%';
+  document.getElementById('cofillPct').textContent = pct + '%';
+  document.getElementById('cofillBadges').style.display = 'flex';
+  document.getElementById('cofillBadges').innerHTML = `
+    <span class="badge green">✅ 已确认 ${confirmed.length}</span>
+    <span class="badge yellow">⚠️ 需审核 ${review.length}</span>
+    <span class="badge gray">⬜ 未填写 ${empty.length}</span>
+  `;
+
+  let html = '';
 
   // 需审核字段
   if (review.length > 0) {
-    html += `<div class="field-group">
-      <div class="field-group-title">⚠️ 需要审核（${review.length}）</div>`;
-    for (const f of review) {
-      html += renderFieldCard(f, 'review');
-    }
-    html += `</div>`;
+    html += `<div class="cofill-field-group-title">⚠️ 需要审核（${review.length}）</div>`;
+    for (const f of review) html += renderCoFillFieldCard(f, 'review');
   }
 
   // 未填写字段
   if (empty.length > 0) {
-    html += `<div class="field-group">
-      <div class="field-group-title">⬜ 需要填写（${empty.length}）</div>`;
-    for (const f of empty) {
-      html += renderFieldCard(f, 'empty');
-    }
-    html += `</div>`;
+    html += `<div class="cofill-field-group-title">⬜ 需要填写（${empty.length}）</div>`;
+    for (const f of empty) html += renderCoFillFieldCard(f, 'empty');
   }
 
   // 已确认字段（折叠）
   if (confirmed.length > 0) {
-    html += `<div class="field-group">
-      <div class="field-group-title" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-        ✅ 已确认（${confirmed.length}） ▾ 点击展开
-      </div>
-      <div style="display:none">`;
-    for (const f of confirmed) {
-      html += renderFieldCard(f, 'confirmed');
-    }
-    html += `</div></div>`;
+    html += `<div class="cofill-field-group-title" style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';this.textContent=this.nextElementSibling.style.display==='none'?'✅ 已确认（${confirmed.length}） ▸ 点击展开':'✅ 已确认（${confirmed.length}） ▾ 点击收起'">✅ 已确认（${confirmed.length}） ▸ 点击展开</div>`;
+    html += `<div style="display:none">`;
+    for (const f of confirmed) html += renderCoFillFieldCard(f, 'confirmed');
+    html += `</div>`;
   }
 
-  // 操作按钮
-  html += `<div class="review-actions">
-    <button class="primary" onclick="submitPrefillReview()">确认并生成</button>
-    <button onclick="sendPrefillToAgent()">交给AI继续填写</button>
-    <button onclick="cancelPrefillReview()">取消</button>
-  </div>`;
+  body.innerHTML = html;
 
-  html += `</div>`;
-  previewBody.innerHTML = html;
+  // 更新右侧预览
+  const previewContainer = document.getElementById('cofillDocContainer');
+  if (docPreviewHtml) {
+    previewContainer.innerHTML = docPreviewHtml;
+  }
+
+  // 更新提交按钮状态
+  document.getElementById('cofillSubmitBtn').disabled = (filled === 0);
 }
 
-function renderFieldCard(field, status) {
+function renderCoFillManual() {
+  /** 在协同视图左侧渲染手动填写表单（无预填数据时） */
+  const body = document.getElementById('cofillFieldsBody');
+
+  // 优先使用prefillData的字段，其次从fieldMap构建
+  let fields = [];
+  if (prefillData && prefillData.fields && prefillData.fields.length > 0) {
+    fields = prefillData.fields;
+  } else if (Object.keys(fieldMap).length > 0) {
+    // 从预览的fieldMap构建字段列表
+    fields = [];
+    for (const [fid, info] of Object.entries(fieldMap)) {
+      const label = info.label || info.raw_label || fid;
+      // 避免重复label
+      if (!fields.find(f => f.label === label)) {
+        fields.push({
+          field_id: fid,
+          label: label,
+          raw_label: label,
+          value: '',
+          confidence: 0,
+          source: '',
+          status: 'empty',
+        });
+      }
+    }
+    // 去重：同一label可能有多个field_id，只保留第一个
+    const seen = new Set();
+    fields = fields.filter(f => {
+      if (seen.has(f.label)) return false;
+      seen.add(f.label);
+      return true;
+    });
+  }
+
+  if (fields.length === 0) {
+    body.innerHTML = `<div class="cofill-step-guide"><div class="step-icon">📝</div><h3>暂无字段信息</h3><p>请先选择模板并等待字段分析完成</p></div>`;
+    return;
+  }
+
+  // 创建prefillData if not exists
+  if (!prefillData) {
+    prefillData = { fields: fields, template_fields: fields.length, prefilled: 0, needs_review: 0, still_empty: fields.length, fill_rate: 0, fill_rate_pct: 0 };
+  }
+
+  // 更新进度
+  document.getElementById('cofillProgress').style.display = 'flex';
+  document.getElementById('cofillBarFill').style.width = '0%';
+  document.getElementById('cofillPct').textContent = '0%';
+  document.getElementById('cofillBadges').style.display = 'flex';
+  document.getElementById('cofillBadges').innerHTML = `<span class="badge gray">⬜ 需填写 ${fields.length}</span>`;
+
+  let html = `<div class="cofill-field-group-title">📝 请填写以下字段（${fields.length}）</div>`;
+  for (const f of fields) html += renderCoFillFieldCard(f, 'empty');
+  body.innerHTML = html;
+
+  // 右侧预览
+  const previewContainer = document.getElementById('cofillDocContainer');
+  if (docPreviewHtml) previewContainer.innerHTML = docPreviewHtml;
+
+  document.getElementById('cofillSubmitBtn').disabled = true;
+}
+
+function renderCoFillFieldCard(field, status) {
+  /** 渲染单个字段卡片 */
   const value = field.value || '';
   const confidence = field.confidence || 0;
   const source = field.source || '';
-  const inputClass = status === 'confirmed' ? 'confirmed-input' : status === 'review' ? 'review-input' : 'empty-input';
+  const label = field.raw_label || field.label;
 
-  return `<div class="field-card ${status}">
-    <div class="field-label">${escapeHtml(field.label)}</div>
-    <div class="field-value">
-      <input type="text" class="${inputClass}"
+  return `<div class="cofill-field-card ${status}">
+    <div class="dot"></div>
+    <div class="field-body">
+      <div class="field-label">${escapeHtml(label)}${source ? `<span class="source-tag">${escapeHtml(source)}</span>` : ''}</div>
+      <input type="text"
         data-field-id="${escapeAttr(field.field_id)}"
-        data-label="${escapeAttr(field.label)}"
+        data-label="${escapeAttr(label)}"
         value="${escapeAttr(value)}"
         placeholder="${status === 'empty' ? '请输入...' : ''}"
-        onchange="onPrefillFieldChange(this)"
+        oninput="onCoFillFieldInput(this)"
       />
     </div>
-    <div class="field-confidence">${confidence > 0 ? Math.round(confidence * 100) + '%' : ''}</div>
-    ${source ? `<div class="field-source" title="${escapeAttr(source)}">📍</div>` : ''}
+    ${confidence > 0 ? `<span class="conf-badge">${Math.round(confidence * 100)}%</span>` : ''}
   </div>`;
 }
 
-function onPrefillFieldChange(input) {
+function onCoFillFieldInput(input) {
   /** 字段值被修改时更新状态 */
-  const card = input.closest('.field-card');
+  const card = input.closest('.cofill-field-card');
   if (input.value.trim()) {
     card.classList.remove('empty', 'review');
     card.classList.add('confirmed');
-    input.classList.remove('empty-input', 'review-input');
-    input.classList.add('confirmed-input');
+  } else {
+    card.classList.remove('confirmed', 'review');
+    card.classList.add('empty');
   }
-  // 更新prefillData中对应的字段
+  // 更新prefillData
   if (prefillData && prefillData.fields) {
     const fid = input.dataset.fieldId;
     const f = prefillData.fields.find(f => f.field_id === fid);
     if (f) {
       f.value = input.value;
       f.status = input.value.trim() ? 'confirmed' : 'empty';
-      f.confidence = 1.0;
-      f.source = '用户填写';
+      f.confidence = input.value.trim() ? 1.0 : 0;
+      f.source = input.value.trim() ? '用户填写' : '';
     }
   }
+  // 更新进度
+  updateCoFillProgress();
+}
+
+function updateCoFillProgress() {
+  /** 更新协同视图的进度条 */
+  if (!prefillData || !prefillData.fields) return;
+  const fields = prefillData.fields;
+  const confirmed = fields.filter(f => f.status === 'confirmed').length;
+  const review = fields.filter(f => f.status === 'review').length;
+  const total = fields.length;
+  const filled = confirmed + review;
+  const pct = total > 0 ? Math.round(filled / total * 100) : 0;
+
+  document.getElementById('cofillBarFill').style.width = pct + '%';
+  document.getElementById('cofillPct').textContent = pct + '%';
+  document.getElementById('cofillBadges').innerHTML = `
+    <span class="badge green">✅ 已确认 ${confirmed}</span>
+    ${review > 0 ? `<span class="badge yellow">⚠️ 需审核 ${review}</span>` : ''}
+    <span class="badge gray">⬜ 未填写 ${total - filled}</span>
+  `;
+
+  // 更新提交按钮
+  document.getElementById('cofillSubmitBtn').disabled = (filled === 0);
+}
+
+// Legacy function kept for backward compat
+function renderFieldCard(field, status) {
+  return renderCoFillFieldCard(field, status);
+}
+
+// Legacy function kept for backward compat
+function onPrefillFieldChange(input) {
+  onCoFillFieldInput(input);
 }
 
 async function submitPrefillReview() {
@@ -1786,7 +2241,7 @@ async function submitPrefillReview() {
 
   // 收集所有字段的最终值
   const finalData = {};
-  const allInputs = document.querySelectorAll('.prefill-review input[data-field-id]');
+  const allInputs = document.querySelectorAll('#cofillFieldsBody input[data-field-id]');
   allInputs.forEach(input => {
     const label = input.dataset.label;
     const value = input.value.trim();
@@ -1809,9 +2264,8 @@ async function submitPrefillReview() {
 
   const agentMsg = `我已经审核了AI预填结果，以下是最终确认的字段值：\n\n${fieldsBlock}\n\n请根据这些信息生成文档。所有已填字段都已确认，无需再追问。`;
 
-  // 退出审核模式
-  prefillMode = false;
-  prefillData = null;
+  // 退出协同模式，回到聊天界面
+  exitCoFill();
 
   // 发送给Agent
   appendMessage('user', '确认预填结果，生成文档');
@@ -1824,37 +2278,24 @@ async function sendPrefillToAgent() {
 
   const fields = prefillData.fields || [];
   const filled = fields.filter(f => f.value && f.status !== 'empty');
-  const empty = fields.filter(f => !f.value || f.status === 'empty');
+  const emptyFields = fields.filter(f => !f.value || f.status === 'empty');
 
   let msg = `AI预填结果如下，已填字段请直接使用，未填字段请继续追问：\n\n[FIELDS]\n`;
   for (const f of filled) {
     msg += `${f.label}=${f.value}\n`;
   }
   msg += `[/FIELDS]\n\n`;
-  msg += `还需填写：${empty.map(f => f.label).join('、')}`;
+  msg += `还需填写：${emptyFields.map(f => f.label).join('、')}`;
 
-  prefillMode = false;
-  prefillData = null;
+  // 退出协同模式，回到聊天界面
+  exitCoFill();
 
   appendMessage('user', '将预填结果交给AI继续');
   await callAgent(msg);
 }
 
-function cancelPrefillReview() {
-  /** 取消审核，恢复预览 */
-  prefillMode = false;
-  prefillData = null;
-  const previewBody = document.getElementById('previewBody');
-  if (docPreviewHtml) {
-    previewBody.innerHTML = docPreviewHtml;
-  } else {
-    previewBody.innerHTML = `<div class="empty-state">
-      <div class="icon-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg></div>
-      <h4>文档预览区</h4>
-      <p>选择模板后，原始文档将在此显示。</p>
-    </div>`;
-  }
-}
+// Legacy: cancelPrefillReview now just calls exitCoFill
+function cancelPrefillReview() { exitCoFill(); }
 
 
 function triggerUpload() {
