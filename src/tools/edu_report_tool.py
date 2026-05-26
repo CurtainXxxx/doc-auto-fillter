@@ -10,6 +10,7 @@ from typing import Optional
 
 from docx import Document
 from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 from langchain.tools import tool
 
 from coze_coding_utils.log.write_log import request_context
@@ -20,6 +21,19 @@ from tools.template_analyzer import analyze_template
 from tools.docx_validator import (
     validate_docx, diff_docx, fix_docx, strip_inline_formatting, sanitize_fill_text,
 )
+from tools.form_filling_state import FormFillingState
+
+
+# ── 分析结果缓存 ──
+_analysis_cache = {}  # key: template_path, value: analysis_result
+
+def _cache_analysis(template_path: str, analysis: dict):
+    """缓存模板分析结果，供生成时复用（避免二次分析导致字段错配）"""
+    _analysis_cache[template_path] = analysis
+
+def _get_cached_analysis(template_path: str) -> Optional[dict]:
+    """获取缓存的分析结果，无则返回None"""
+    return _analysis_cache.get(template_path)
 
 
 # ── 模板注册表 ──
@@ -202,6 +216,140 @@ def _set_tc_text(tc, text: str, rPr_source=None):
 def _set_cell_text(cell, text: str, rPr_source=None):
     """设置单元格文本（清空后写入），保留格式。"""
     _set_tc_text(cell._element, text, rPr_source=rPr_source)
+
+
+# ─── 词元级样式继承：智能定位目标 run ────────────────────────────
+
+def _find_fill_target_run(paragraph):
+    """在段落中找到最适合填入文本的 run。
+    
+    优先级：
+    1. 文本为空白/占位符的 run（最理想：保留下划线等格式）
+    2. 包含占位符文本（yyyy、xxx、请填写等）的 run
+    3. 第一个包含 <w:t> 的 run（兜底）
+    """
+    runs = paragraph.findall(qn("w:r"))
+    if not runs:
+        return None
+    
+    # 优先1：文本为空白或纯空格的 run（保留下划线、字体等格式）
+    for run in runs:
+        t_elems = run.findall(qn("w:t"))
+        if t_elems:
+            t_text = "".join(t.text or "" for t in t_elems)
+            if t_text.strip() == "":
+                return run
+    
+    # 优先2：包含占位符文本的 run
+    placeholder_patterns = ['yyyy', 'xxx', 'XX', '请填写', '请输入', '（请', '(请']
+    for run in runs:
+        t_elems = run.findall(qn("w:t"))
+        if t_elems:
+            t_text = "".join(t.text or "" for t in t_elems)
+            for pat in placeholder_patterns:
+                if pat in t_text:
+                    return run
+    
+    # 优先3：第一个有 <w:t> 的 run
+    for run in runs:
+        if run.findall(qn("w:t")):
+            return run
+    
+    # 优先4：任何 run
+    return runs[0]
+
+
+def _set_tc_text_v2(tc, text: str, mode: str = "set", rPr_source=None):
+    """词元级样式继承版本的 _set_tc_text。
+    
+    与 _set_tc_text 的区别：
+    - set 模式：找到空白/占位符 run，直接修改其 .text，100% 保留格式
+    - append 模式：在标签后追加，保留标签 run 的格式
+    - replace 模式：整体替换文本，保留段落和第一个 run 的格式
+    
+    Args:
+        tc: 表格单元格 XML 元素
+        text: 要填入的文本
+        mode: "set" | "append" | "replace"
+        rPr_source: 兜底格式来源
+    """
+    text = sanitize_fill_text(str(text))
+    
+    paragraphs = tc.findall(qn("w:p"))
+    if not paragraphs:
+        _append_paragraph_with_text(tc, text, rPr_source=rPr_source)
+        return
+    
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if not lines:
+        lines = [""]
+    
+    first_ppr = paragraphs[0].find(qn("w:pPr"))
+    
+    for idx, line in enumerate(lines):
+        if idx < len(paragraphs):
+            para = paragraphs[idx]
+            
+            if mode == "set":
+                # 智能定位：找空白/占位符 run，直接改 text
+                target_run = _find_fill_target_run(para)
+                if target_run is not None:
+                    t_elems = target_run.findall(qn("w:t"))
+                    if t_elems:
+                        # 找到目标 run，设置文本，清空其他 run 的文本
+                        t_elems[0].text = line
+                        t_elems[0].set(qn("xml:space"), "preserve")
+                        # 删除目标 run 中多余的 <w:t>
+                        for t in t_elems[1:]:
+                            target_run.remove(t)
+                        # 清空其他 run 的文本（保留元素结构不删，避免格式丢失）
+                        for run in para.findall(qn("w:r")):
+                            if run is not target_run:
+                                for t in run.findall(qn("w:t")):
+                                    t.text = ""
+                    else:
+                        # run 没有 <w:t>，添加一个
+                        new_t = OxmlElement("w:t")
+                        new_t.text = line
+                        new_t.set(qn("xml:space"), "preserve")
+                        target_run.append(new_t)
+                else:
+                    # 没有 run，创建新段落内容
+                    effective_rpr = rPr_source
+                    _set_paragraph_text_preserve_runs(para, line, effective_rpr)
+                    
+            elif mode == "append":
+                # 在现有文本后追加
+                effective_rpr = _get_first_run_rpr(para)
+                if effective_rpr is None:
+                    effective_rpr = rPr_source
+                _set_paragraph_text_preserve_runs(para, line, effective_rpr)
+                
+            elif mode == "replace":
+                # 整体替换：保留 pPr + 第一个 run 的 rPr
+                effective_rpr = _get_first_run_rpr(para)
+                if effective_rpr is None:
+                    effective_rpr = rPr_source
+                _set_paragraph_text_preserve_runs(para, line, effective_rpr)
+            else:
+                effective_rpr = _get_first_run_rpr(para)
+                if effective_rpr is None:
+                    effective_rpr = rPr_source
+                _set_paragraph_text_preserve_runs(para, line, effective_rpr)
+        else:
+            _append_paragraph_with_text(tc, line, rPr_source=rPr_source, pPr_source=first_ppr)
+    
+    # 清空多余段落的内容
+    for paragraph in paragraphs[len(lines):]:
+        effective_rpr = _get_first_run_rpr(paragraph)
+        if effective_rpr is None:
+            effective_rpr = rPr_source
+        _set_paragraph_text_preserve_runs(paragraph, "", effective_rpr)
+
+
+def _set_cell_text_v2(cell, text: str, mode: str = "set", rPr_source=None):
+    """词元级样式继承版本的 _set_cell_text。"""
+    _set_tc_text_v2(cell._element, text, mode=mode, rPr_source=rPr_source)
 
 
 def _replace_signature_and_date_in_tc(tc, label: str, existing_value: str, value: str):
@@ -563,7 +711,8 @@ def _fill_label_fields(doc, label_fields, data):
                 if col_idx < len(tcs):
                     # 获取同行标签格的格式作为格式源
                     rPr_source = _find_label_rPr_in_row(tr)
-                    _set_tc_text(tcs[col_idx], str(value), rPr_source=rPr_source)
+                    # 使用 v2：智能定位空白/占位符 run，保留词元级格式
+                    _set_tc_text_v2(tcs[col_idx], str(value), mode="set", rPr_source=rPr_source)
             
             elif fill_mode == "replace":
                 # 占位符替换模式
@@ -581,9 +730,9 @@ def _fill_label_fields(doc, label_fields, data):
                         # colon模式空值：在标签后追加
                         _append_value_to_tc_after_label(tc, raw_label, str(value))
                     else:
-                        # 非colon模式：清空格内容后写入新值
+                        # 非colon模式：清空格内容后写入新值，使用v2保留格式
                         rPr_source = _find_label_rPr_in_row(tr)
-                        _set_tc_text(tc, str(value), rPr_source=rPr_source)
+                        _set_tc_text_v2(tc, str(value), mode="replace", rPr_source=rPr_source)
             
             elif fill_mode == "append":
                 col_idx = f["col_idx"]
@@ -762,7 +911,7 @@ def _fill_simple_row_groups(doc, groups, data):
                 # 空白格或占位符格：填入数据
                 if not text or text in ("%", "…", "……"):
                     rPr_source = _find_label_rPr_in_row(tr)
-                    _set_tc_text(tc, str(row_data[data_idx]), rPr_source=rPr_source)
+                    _set_tc_text_v2(tc, str(row_data[data_idx]), mode="set", rPr_source=rPr_source)
                     fid = f"T{t_idx}_G{g_num}_R{row_offset}_C{data_idx}"
                     rg_field_values[fid] = str(row_data[data_idx])
                     data_idx += 1
@@ -803,7 +952,7 @@ def _fill_simple_row_groups(doc, groups, data):
                                     all_text.append(t.text)
                     text = "".join(all_text).strip()
                     if not text or text in ("%", "…", "……"):
-                        _set_tc_text(tc, str(row_data[data_idx]))
+                        _set_tc_text_v2(tc, str(row_data[data_idx]), mode="set")
                         fid = f"T{t_idx}_G{g_num}_R{extra_idx}_C{data_idx}"
                         rg_field_values[fid] = str(row_data[data_idx])
                         data_idx += 1
@@ -1113,7 +1262,7 @@ def _simplify_fields(label_fields):
 
 # ── 数据扩展 ──
 
-def _expand_report_data(template_path: str, user_data: dict) -> dict:
+def _expand_report_data(template_path: str, user_data: dict, analysis_result: dict = None) -> dict:
     """将用户友好的字段数据扩展为完整的内部字段数据。
     
     处理逻辑：
@@ -1121,8 +1270,13 @@ def _expand_report_data(template_path: str, user_data: dict) -> dict:
     2. 勾选框字段（如"课程性质": "必修"）由_fill_checkbox_rows_in_table处理，此处原样保留
     3. 考勤数据自动映射到子字段
     4. 分数段比例自动计算（如果用户未提供）
+    
+    Args:
+        template_path: 模板文件路径
+        user_data: 用户提供的 {标签名: 值} 字典
+        analysis_result: 可选的已有分析结果，避免二次分析
     """
-    analysis = analyze_template(template_path)
+    analysis = analysis_result or analyze_template(template_path)
     label_fields = analysis["label_fields"]
     
     # 构建基础名→子字段映射
@@ -1247,13 +1401,19 @@ def _expand_report_data(template_path: str, user_data: dict) -> dict:
 
 # ── 主生成函数 ──
 
-def _build_report_docx(template_path: str, user_data: dict):
-    """根据模板和用户数据生成填充后的docx文件。"""
-    analysis = analyze_template(template_path)
+def _build_report_docx(template_path: str, user_data: dict, analysis_result: dict = None):
+    """根据模板和用户数据生成填充后的docx文件。
+    
+    Args:
+        template_path: 模板文件路径
+        user_data: 用户提供的 {标签名: 值} 字典
+        analysis_result: 可选的已有分析结果，避免二次分析
+    """
+    analysis = analysis_result or analyze_template(template_path)
     doc = Document(template_path)
     
     # 1. 扩展用户数据
-    expanded_data = _expand_report_data(template_path, user_data)
+    expanded_data = _expand_report_data(template_path, user_data, analysis_result=analysis_result)
     
     # 2. 识别勾选框行，排除与勾选框冲突的标签字段
     checkbox_rows = set()  # {(table_idx, row_idx)}
@@ -1356,7 +1516,7 @@ def _expand_generic_data(label_fields, user_data):
     return expanded
 
 
-def _fill_custom_template(template_path: str, user_data: dict):
+def _fill_custom_template(template_path: str, user_data: dict, analysis_result: dict = None):
     """通用模板纯填充：只向空白格/待填格写入文本，绝不改变文档格式。
     
     与 _build_report_docx 的区别：
@@ -1364,7 +1524,7 @@ def _fill_custom_template(template_path: str, user_data: dict):
     - 使用 _expand_generic_data 展开通用归组字段
     - 完整保留原有字体、字号、加粗、对齐等格式
     """
-    analysis = analyze_template(template_path)
+    analysis = analysis_result or analyze_template(template_path)
     doc = Document(template_path)
     
     # 0. 展开归组字段数据
@@ -1476,6 +1636,9 @@ def analyze_report_template(template_name: str) -> str:
         path = _get_template_path(template_name)
         analysis = analyze_template(path)
         
+        # 缓存分析结果，供生成时复用（避免二次分析导致字段错配）
+        _cache_analysis(path, analysis)
+        
         # 简化字段列表
         user_fields = _simplify_fields(analysis["label_fields"])
         
@@ -1529,8 +1692,11 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         else:
             data = report_data
         
-        # 生成文档
-        docx_bytes, analysis, expanded_data, rg_field_values = _build_report_docx(path, data)
+        # 从缓存加载分析结果（避免二次分析导致字段错配）
+        cached_analysis = _get_cached_analysis(path)
+        
+        # 生成文档（传入已有的analysis_result避免二次分析）
+        docx_bytes, analysis, expanded_data, rg_field_values = _build_report_docx(path, data, analysis_result=cached_analysis)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -1699,8 +1865,11 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         
         data = json.loads(report_data)
         
-        # 通用模板：直接填充，不调用expand（保留原格式）
-        doc_bytes, analysis, expanded_data, rg_field_values = _fill_custom_template(full_path, data)
+        # 从缓存加载分析结果（避免二次分析导致字段错配）
+        cached_analysis = _get_cached_analysis(full_path)
+        
+        # 通用模板：直接填充，不调用expand（保留原格式），传入analysis_result避免二次分析
+        doc_bytes, analysis, expanded_data, rg_field_values = _fill_custom_template(full_path, data, analysis_result=cached_analysis)
         
         # 上传到对象存储
         from coze_coding_dev_sdk.s3 import S3SyncStorage
@@ -1765,3 +1934,215 @@ def generate_from_template(file_path: str, report_data: str) -> str:
             "success": False,
             "message": f"文档生成失败: {e}",
         }, ensure_ascii=False)
+
+
+# ──────────────────────────────────────────────────────
+# FormFillingState — 表单填充状态机
+# ──────────────────────────────────────────────────────
+_active_form_states: dict[str, FormFillingState] = {}
+
+def _get_or_create_state(session_id: str, template_path: str = None) -> FormFillingState:
+    """获取或创建表单填充状态"""
+    if session_id not in _active_form_states and template_path:
+        state = FormFillingState(session_id=session_id)
+        analysis = analyze_template(template_path)
+        state.init_from_analysis(analysis)
+        state.template_path = template_path
+        _cache_analysis(template_path, analysis)
+        _active_form_states[session_id] = state
+    return _active_form_states.get(session_id)
+
+
+def _resolve_template_path(template_name_or_path: str) -> str:
+    """将模板名称或路径解析为实际文件路径"""
+    # 先匹配内置模板注册表
+    workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    for name, rel_path in TEMPLATE_REGISTRY.items():
+        if name in template_name_or_path:
+            return os.path.join(workspace, rel_path)
+    # 再检查是否为有效文件路径
+    if os.path.exists(template_name_or_path):
+        return template_name_or_path
+    # 尝试在 assets 目录下查找
+    assets_path = os.path.join(workspace, "assets", template_name_or_path)
+    if os.path.exists(assets_path):
+        return assets_path
+    raise ValueError(f"找不到模板: {template_name_or_path}，可用模板: [{', '.join(TEMPLATE_REGISTRY.keys())}]")
+
+
+@tool
+def init_form_filling(session_id: str, template_name_or_path: str) -> str:
+    """初始化表单填充状态机。在选择模板后调用，后续用 get_form_status / update_form_fields 推进填写。
+
+    Args:
+        session_id: 会话ID（可用任意唯一字符串）
+        template_name_or_path: 模板名称（如"评价报告"）或模板文件路径
+    """
+    try:
+        template_path = _resolve_template_path(template_name_or_path)
+
+        state = FormFillingState(session_id=session_id, template_path=template_path,
+                                  template_name=template_name_or_path)
+        analysis = analyze_template(template_path)
+        state.init_from_analysis(analysis)
+        _cache_analysis(template_path, analysis)
+        _active_form_states[session_id] = state
+
+        summary = state.get_summary()
+        summary["success"] = True
+        summary["message"] = f"表单状态已初始化，共{summary['total_fields']}个字段待填"
+        return json.dumps(summary, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"初始化表单状态失败: {e}"}, ensure_ascii=False)
+
+
+@tool
+def get_form_status(session_id: str) -> str:
+    """查询当前表单填写状态：已填/未填/待确认字段，以及建议的下一批问题。
+
+    Args:
+        session_id: 会话ID
+    """
+    try:
+        state = _active_form_states.get(session_id)
+        if not state:
+            return json.dumps({"success": False, "message": "表单状态不存在，请先调用 init_form_filling"}, ensure_ascii=False)
+
+        summary = state.get_summary()
+        next_batch = state.get_next_batch(5)
+        missing_important = state.get_missing_important()
+
+        result = {
+            "success": True,
+            "progress_pct": round(summary["filled_count"] / max(summary["total_fields"], 1) * 100, 1),
+            "summary": summary,
+            "next_batch_questions": [
+                {"field_id": f["field_id"], "label": f.get("label", ""), "fill_mode": f["fill_mode"]}
+                for f in next_batch
+            ],
+            "missing_important": missing_important[:10],
+        }
+        return json.dumps(result, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"查询状态失败: {e}"}, ensure_ascii=False)
+
+
+@tool
+def update_form_fields(session_id: str, field_values: str) -> str:
+    """批量更新表单字段值。支持一次性填入多个字段，自动识别标签名映射到field_id。
+
+    Args:
+        session_id: 会话ID
+        field_values: JSON字符串，格式为 {"标签名或field_id": "值", ...}，如 {"课程名称": "数据结构", "T0_R3_C1": "张三"}
+    """
+    try:
+        state = _active_form_states.get(session_id)
+        if not state:
+            return json.dumps({"success": False, "message": "表单状态不存在，请先调用 init_form_filling"}, ensure_ascii=False)
+
+        values = json.loads(field_values) if isinstance(field_values, str) else field_values
+        matched, unmatched = state.bulk_fill(values)
+
+        summary = state.get_summary()
+        result = {
+            "success": True,
+            "matched_count": len(matched),
+            "unmatched_labels": unmatched,
+            "progress_pct": round(summary["filled_count"] / max(summary["total_fields"], 1) * 100, 1),
+            "still_missing": summary["empty_count"],
+            "next_batch": [
+                {"field_id": f["field_id"], "label": f.get("label", ""), "fill_mode": f["fill_mode"]}
+                for f in state.get_next_batch(5)
+            ],
+        }
+        return json.dumps(result, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"更新字段失败: {e}"}, ensure_ascii=False)
+
+
+@tool
+def generate_form_document(session_id: str) -> str:
+    """根据当前表单状态生成Word文档。所有已填字段会被写入文档，未填字段保持空白。
+
+    Args:
+        session_id: 会话ID
+    """
+    try:
+        import time as _time
+
+        state = _active_form_states.get(session_id)
+        if not state:
+            return json.dumps({"success": False, "message": "表单状态不存在"}, ensure_ascii=False)
+
+        # 获取已填字段值（label→value 映射，兼容生成引擎）
+        filled_values = state.get_label_value_map()
+        template_path = state.template_path
+
+        if not filled_values:
+            return json.dumps({"success": False, "message": "尚未填写任何字段"}, ensure_ascii=False)
+
+        # 获取缓存的分析结果
+        analysis = _get_cached_analysis(template_path)
+        if not analysis:
+            analysis = analyze_template(template_path)
+
+        # 判断是内置模板还是自定义模板
+        is_builtin = any(name in template_path for name in TEMPLATE_REGISTRY.keys())
+
+        if is_builtin:
+            docx_bytes, _, _, _ = _build_report_docx(template_path, filled_values, analysis_result=analysis)
+        else:
+            docx_bytes, _, _, _ = _fill_custom_template(template_path, filled_values, analysis_result=analysis)
+
+        # 上传到对象存储
+        from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
+
+        timestamp = _time.strftime("%Y%m%d%H%M%S")
+        safe_name = (state.template_name or "form").replace(" ", "_")
+        file_name = f"edu_form/{safe_name}_{timestamp}.docx"
+
+        file_key = storage.upload_file(
+            file_content=docx_bytes,
+            file_name=file_name,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        url = storage.generate_presigned_url(key=file_key, expire_time=86400)
+
+        # 保存本地副本
+        local_path = os.path.join("/tmp", os.path.basename(file_name))
+        with open(local_path, "wb") as f:
+            f.write(docx_bytes)
+
+        # 校验
+        validation = validate_doc(template_path, local_path)
+
+        summary = state.get_summary()
+        result = {
+            "success": True,
+            "message": f"文档已生成，填写率{round(summary['filled_count']/max(summary['total_fields'],1)*100, 1)}%",
+            "download_url": url,
+            "local_path": local_path,
+            "progress": summary,
+            "validation": validation,
+        }
+
+        if validation.get("diff"):
+            result["diff_summary"] = validation["diff"]["summary"]
+            result["diff_filled_count"] = len(validation["diff"]["filled"])
+            result["diff_still_empty_count"] = len(validation["diff"]["still_empty"])
+
+        return json.dumps(result, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"生成文档失败: {e}"}, ensure_ascii=False)

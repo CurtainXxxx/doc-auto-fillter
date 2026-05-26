@@ -21,6 +21,7 @@ from storage.memory.memory_saver import get_memory_saver
 from tools.edu_report_tool import (
     generate_edu_report, analyze_report_template, list_templates,
     analyze_uploaded_template, generate_from_template,
+    init_form_filling, get_form_status, update_form_fields, generate_form_document,
 )
 from tools.knowledge_tool import parse_knowledge_file, extract_facts
 from tools.prefill_tool import prefill_from_knowledge, prefill_from_multiple_knowledge
@@ -153,7 +154,8 @@ def build_agent(ctx=None):
         system_prompt=cfg.get("sp"),
         tools=[list_templates, analyze_report_template, generate_edu_report,
                parse_knowledge_file, extract_facts, analyze_uploaded_template, generate_from_template,
-               prefill_from_knowledge, prefill_from_multiple_knowledge],
+               prefill_from_knowledge, prefill_from_multiple_knowledge,
+               init_form_filling, get_form_status, update_form_fields, generate_form_document],
         checkpointer=get_memory_saver(),
         state_schema=AgentState,
         middleware=[handle_tool_errors, sanitize_before_llm],
