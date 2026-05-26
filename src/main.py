@@ -40,6 +40,55 @@ setup_logging(
 )
 
 logger = logging.getLogger(__name__)
+
+# ── 安全：路径校验，防止路径遍历攻击 ──────────────────────────
+_SAFE_DIRS: list[str] = []  # 延迟初始化
+
+def _init_safe_dirs() -> list[str]:
+    """初始化允许访问的目录白名单"""
+    global _SAFE_DIRS
+    if not _SAFE_DIRS:
+        workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+        _SAFE_DIRS = [
+            os.path.normpath(workspace),
+            os.path.normpath("/tmp"),
+            os.path.normpath("/app/work"),
+        ]
+    return _SAFE_DIRS
+
+def _safe_path(user_path: str) -> str:
+    """校验用户传入的路径，防止路径遍历攻击。
+    
+    只允许访问 workspace、/tmp、/app/work 下的文件。
+    """
+    if not user_path:
+        raise HTTPException(status_code=400, detail="路径不能为空")
+    
+    # 远程URL走单独逻辑，不做本地路径校验
+    if user_path.startswith("http://") or user_path.startswith("https://"):
+        return user_path
+    
+    # 规范化路径，消除 ../ 等
+    norm = os.path.normpath(user_path)
+    
+    # 检查是否包含路径遍历
+    if ".." in norm.split(os.sep):
+        raise HTTPException(status_code=403, detail="非法路径：禁止路径遍历")
+    
+    # 如果是绝对路径，检查是否在安全目录下
+    if os.path.isabs(norm):
+        safe_dirs = _init_safe_dirs()
+        if not any(norm.startswith(d) for d in safe_dirs):
+            raise HTTPException(status_code=403, detail="非法路径：禁止访问指定目录外的文件")
+        return norm
+    
+    # 相对路径：拼接 workspace 后再校验
+    workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
+    full = os.path.normpath(os.path.join(workspace, norm))
+    safe_dirs = _init_safe_dirs()
+    if not any(full.startswith(d) for d in safe_dirs):
+        raise HTTPException(status_code=403, detail="非法路径：禁止访问指定目录外的文件")
+    return full
 from coze_coding_utils.helper.agent_helper import to_stream_input
 from coze_coding_utils.openai.handler import OpenAIChatHandler
 from coze_coding_utils.log.parser import LangGraphParser
@@ -646,21 +695,17 @@ async def prefill_template(request: Request):
         }
         if template_path in template_map:
             full_template_path = os.path.join(workspace, "assets", template_map[template_path])
-        elif os.path.isabs(template_path):
-            full_template_path = template_path
         else:
-            full_template_path = os.path.join(workspace, template_path)
+            # 非内置模板名，走路径安全校验
+            full_template_path = _safe_path(template_path)
 
         if not os.path.exists(full_template_path):
             return JSONResponse(content={"success": False, "message": f"模板文件不存在: {template_path}"})
 
-        # 解析知识文件路径
+        # 解析知识文件路径（全部走安全校验）
         full_file_paths = []
         for fp in file_paths:
-            if os.path.isabs(fp):
-                full_file_paths.append(fp)
-            else:
-                full_file_paths.append(os.path.join(workspace, fp))
+            full_file_paths.append(_safe_path(fp))
 
         # 调用预填工具
         from tools.prefill_tool import prefill_from_file_paths
@@ -691,8 +736,9 @@ async def template_preview(path: str = ""):
     }
     if path in template_map:
         full_path = os.path.join(workspace, "assets", template_map[path])
-    elif not os.path.isabs(path):
-        full_path = os.path.join(workspace, path)
+    else:
+        # 非内置模板名，走路径安全校验
+        full_path = _safe_path(path)
 
     if not os.path.exists(full_path):
         return JSONResponse(content={"success": False, "message": f"文件不存在: {path}"})
@@ -717,12 +763,15 @@ async def generated_preview(local_path: str = ""):
     if not local_path:
         return JSONResponse(content={"success": False, "message": "缺少 local_path 参数"})
 
-    if not os.path.exists(local_path):
+    # 安全校验路径
+    safe_local_path = _safe_path(local_path)
+
+    if not os.path.exists(safe_local_path):
         return JSONResponse(content={"success": False, "message": f"文件不存在: {local_path}"})
 
     try:
         from tools.docx_preview import docx_to_html
-        result = docx_to_html(local_path)
+        result = docx_to_html(safe_local_path)
         return JSONResponse(content={
             "success": True,
             "html": result["html"],
@@ -760,11 +809,11 @@ async def http_download_docx(file_path: str = ""):
         except Exception as e:
             return JSONResponse(content={"success": False, "message": f"下载失败: {e}"})
 
-    # 本地文件路径
-    full_path = file_path
+    # 本地文件路径 — 安全校验
+    full_path = _safe_path(file_path)
     if not os.path.isabs(file_path):
         from tools.docx_preview import _resolve_template_path
-        full_path = _resolve_template_path(file_path)
+        full_path = _safe_path(_resolve_template_path(file_path))
     if not os.path.isfile(full_path):
         return JSONResponse(content={"success": False, "message": f"文件不存在: {file_path}"})
     fname = os.path.basename(full_path)
@@ -779,7 +828,7 @@ async def http_convert_pdf(file_path: str = ""):
         return JSONResponse(content={"success": False, "message": "缺少 file_path"})
     # 支持模板名解析（如"试卷分析"）
     from tools.docx_preview import _resolve_template_path
-    full_path = _resolve_template_path(file_path)
+    full_path = _safe_path(_resolve_template_path(file_path))
     if not os.path.isfile(full_path):
         return JSONResponse(content={"success": False, "message": f"文件不存在: {file_path}"})
     try:

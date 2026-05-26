@@ -1455,10 +1455,13 @@ def _fill_multi_col_field(doc, field, value):
 @tool
 def list_templates() -> str:
     """列出所有可用的教务报告模板。"""
-    templates = []
-    for name, path in TEMPLATE_REGISTRY.items():
-        templates.append({"name": name, "file": os.path.basename(path)})
-    return json.dumps({"success": True, "templates": templates}, ensure_ascii=False)
+    try:
+        templates = []
+        for name, path in TEMPLATE_REGISTRY.items():
+            templates.append({"name": name, "file": os.path.basename(path)})
+        return json.dumps({"success": True, "templates": templates}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "message": f"获取模板列表失败: {e}"}, ensure_ascii=False)
 
 
 @tool

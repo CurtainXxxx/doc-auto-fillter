@@ -393,46 +393,54 @@ def parse_knowledge_file(file_description: str, file_content: str, missing_field
     """
     ctx = request_context.get() or new_context(method="parse_knowledge_file")
 
-    fields = [f.strip() for f in missing_fields.split(',') if f.strip()]
-    content = file_content[:10000]  # 扩大到10000字符
+    try:
+        fields = [f.strip() for f in missing_fields.split(',') if f.strip()]
+        content = file_content[:10000]  # 扩大到10000字符
 
-    result = {
-        "file": file_description,
-        "missing_fields": fields,
-        "extracted": {},
-        "summary": f"已从文件中智能提取以下字段：{', '.join(fields)}"
-    }
+        result = {
+            "file": file_description,
+            "missing_fields": fields,
+            "extracted": {},
+            "summary": f"已从文件中智能提取以下字段：{', '.join(fields)}"
+        }
 
-    # 优先：LLM智能提取
-    llm_extracted = _llm_extract_fields(fields, content, ctx=ctx)
+        # 优先：LLM智能提取
+        llm_extracted = _llm_extract_fields(fields, content, ctx=ctx)
 
-    # 兜底：规则匹配提取
-    rule_extracted = _rule_extract_fields(fields, content)
+        # 兜底：规则匹配提取
+        rule_extracted = _rule_extract_fields(fields, content)
 
-    # 合并结果：LLM优先，规则补充
-    for field in fields:
-        if field in llm_extracted:
-            result["extracted"][field] = llm_extracted[field]
-        elif field in rule_extracted:
-            result["extracted"][field] = rule_extracted[field]
+        # 合并结果：LLM优先，规则补充
+        for field in fields:
+            if field in llm_extracted:
+                result["extracted"][field] = llm_extracted[field]
+            elif field in rule_extracted:
+                result["extracted"][field] = rule_extracted[field]
 
-    # 生成提示
-    lines = []
-    found_fields = []
-    for field in fields:
-        if field in result["extracted"]:
-            lines.append(f"✅ {field}：{result['extracted'][field]}")
-            found_fields.append(field)
+        # 生成提示
+        lines = []
+        found_fields = []
+        for field in fields:
+            if field in result["extracted"]:
+                lines.append(f"✅ {field}：{result['extracted'][field]}")
+                found_fields.append(field)
 
-    unfound = [f for f in fields if f not in result["extracted"]]
-    if unfound:
-        lines.append(f"⚠ 未找到：{', '.join(unfound)}")
+        unfound = [f for f in fields if f not in result["extracted"]]
+        if unfound:
+            lines.append(f"⚠ 未找到：{', '.join(unfound)}")
 
-    result["choice_prompt"] = '\n'.join(lines)
-    result["found_count"] = len(found_fields)
-    result["total_count"] = len(fields)
+        result["choice_prompt"] = '\n'.join(lines)
+        result["found_count"] = len(found_fields)
+        result["total_count"] = len(fields)
 
-    return json.dumps(result, ensure_ascii=False)
+        return json.dumps(result, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "message": f"知识文件解析失败: {e}",
+            "file": file_description,
+        }, ensure_ascii=False)
 
 
 @tool
