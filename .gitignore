@@ -2,12 +2,33 @@ node_modules
 dist
 .DS_Store
 *.swp
-.git/*
 __pycache__/
 *.pyc
+*.pyo
 .venv
 *.o
 *.a
 /vendor
 *.egg-info/
-.cozeproj/reduction
+
+# 平台配置
+.coze/
+.cozeproj/
+
+# 环境变量（含 API 密钥）
+.env
+
+# 本地调试入口
+
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 日志
+/app/work/logs/
+
+# 模板生成的临时文件（保留原始模板，忽略带时间戳的副本）
+assets/*_2026*.docx
+assets/*.png
