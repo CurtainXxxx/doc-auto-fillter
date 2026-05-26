@@ -10,3 +10,4 @@ __pycache__/
 *.a
 /vendor
 *.egg-info/
+.cozeproj/reduction
