@@ -32,3 +32,4 @@ __pycache__/
 # 模板生成的临时文件（保留原始模板，忽略带时间戳的副本）
 assets/*_2026*.docx
 assets/*.png
+.cozeproj/reduction
