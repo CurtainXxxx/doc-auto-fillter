@@ -1,300 +1,405 @@
-# 教务文档自动填充系统 — 项目架构文档
+# 项目架构文档
 
-## 一、文件树
+## 一、系统总览
 
 ```
-/workspace/projects/
-│
-├── .env                                  # 外部模型API密钥（DeepSeek）
-├── .env.example                          # API密钥配置模板
-├── .gitignore                            # Git忽略规则
-├── pyproject.toml                        # 项目依赖声明（uv管理）
-├── requirements.txt                      # pip依赖（兼容）
-│
-├── config/
-│   └── agent_llm_config.json             # LLM配置 + 系统提示词 + 工具注册
-│
-├── assets/                               # 资源目录
-│   ├── ...评价报告模板.docx               # 内置模板1
-│   ├── ...试卷分析模板.docx               # 内置模板2
-│   └── ...关联矩阵表模板.docx             # 内置模板3
-│
-├── src/                                  # 核心源码
-│   ├── __init__.py
-│   │
-│   ├── main.py                           # HTTP服务入口（FastAPI，655行）
-│   │
-│   ├── agents/
-│   │   ├── __init__.py
-│   │   └── agent.py                      # Agent主逻辑（120行）
-│   │
-│   ├── tools/
-│   │   ├── __init__.py
-│   │   ├── template_analyzer.py          # 模板解析器（635行）
-│   │   ├── edu_report_tool.py            # 文档生成工具（1286行）
-│   │   └── knowledge_tool.py             # 知识文件提取（435行）
-│   │
-│   ├── storage/
-│   │   ├── __init__.py
-│   │   ├── memory/
-│   │   │   ├── __init__.py
-│   │   │   └── memory_saver.py           # 短期记忆（134行）
-│   │   └── database/
-│   │       ├── __init__.py
-│   │       ├── db.py                     # 数据库连接（94行）
-│   │       └── shared/
-│   │           ├── __init__.py
-│   │           └── model.py
-│   │
-│   └── utils/
-│       ├── __init__.py
-│       ├── helper.py
-│       └── log/
-│           ├── __init__.py
-│           └── loop_trace.py
-│
-├── web/
-│   └── index.html                        # 前端界面（1203行）
-│
-└── scripts/                              # 运维脚本
-    ├── http_run.sh                       # 启动HTTP服务
-    ├── local_run.sh                      # 本地运行
-    ├── pack.sh                           # 打包
-    ├── setup.sh                          # 环境初始化
-    ├── load_env.py                       # 环境变量加载（Python）
-    └── load_env.sh                       # 环境变量加载（Shell）
+┌──────────────────────────────────────────────────────────┐
+│                      用户（浏览器）                        │
+│                  web/index.html (SPA)                     │
+└──────────────┬──────────────────────────┬────────────────┘
+               │ HTTP/SSE                 │ 文件上传
+               ▼                          ▼
+┌──────────────────────────────────────────────────────────┐
+│                   FastAPI 服务层                           │
+│                      src/main.py                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ /run      │ │ /upload  │ │ /prefill │ │ /preview │    │
+│  │ /stream   │ │ /template│ │          │ │ /download│    │
+│  └─────┬────┘ └─────┬────┘ └─────┬────┘ └─────┬────┘    │
+└────────┼────────────┼───────────┼────────────┼──────────┘
+         │            │           │            │
+         ▼            ▼           ▼            ▼
+┌──────────────────────────────────────────────────────────┐
+│                   Agent 层 (LangGraph)                     │
+│                   src/agents/agent.py                     │
+│                                                          │
+│  ┌─────────────────────────────────────────────────┐     │
+│  │              工具集 (9 个 @tool)                   │     │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────────┐     │     │
+│  │  │模板分析   │ │文档生成   │ │ 知识文件处理  │     │     │
+│  │  │analyze   │ │generate  │ │ parse_know   │     │     │
+│  │  │list      │ │          │ │ extract_facts│     │     │
+│  │  └──────────┘ └──────────┘ └──────────────┘     │     │
+│  │  ┌──────────────────────┐ ┌──────────────┐     │     │
+│  │  │   AI 预填             │ │ 文档预览     │     │     │
+│  │  │ prefill_single/multi │ │ (前端渲染)   │     │     │
+│  │  └──────────────────────┘ └──────────────┘     │     │
+│  └─────────────────────────────────────────────────┘     │
+└──────────────────────────────────────────────────────────┘
+         │            │           │
+         ▼            ▼           ▼
+┌──────────────┐ ┌─────────┐ ┌──────────────┐
+│ 模板解析引擎  │ │校验管线  │ │ S3 对象存储   │
+│ analyzer.py  │ │validator│ │ (文件存储)    │
+└──────────────┘ └─────────┘ └──────────────┘
 ```
-
----
 
 ## 二、核心模块详解
 
-### 2.1 main.py — HTTP服务（655行）
+### 2.1 模板解析引擎 (`template_analyzer.py` — 1169 行)
 
-| API路由 | 方法 | 功能 |
-|---|---|---|
-| `/` | GET | 重定向到 /web/ |
-| `/chat` | POST | Agent对话（SSE流式响应） |
-| `/upload` | POST | 知识文件上传（返回文件路径+内容） |
-| `/upload-template` | POST | 模板文件上传（返回路径+提取文本） |
-| `/web/*` | GET | 静态文件（前端） |
+**职责**：解析任意 Word 模板，自动识别所有可填充字段。
 
----
-
-### 2.2 agent.py — Agent主逻辑（120行）
+**字段识别算法**（5 层扫描）：
 
 ```
-build_agent()
-  ├── 加载 .env（override=True）
-  ├── 判断外部API or 内置API
-  │   ├── 外部: DeepSeek（ChatOpenAI + base_url + api_key）
-  │   └── 内置: doubao-seed（COZE_WORKLOAD_IDENTITY_API_KEY）
-  ├── _strip_reasoning 中间件 → 清理DeepSeek reasoning_content
-  └── create_agent(model, tools, checkpointer, state_schema)
+输入：Word 模板 (.docx)
+         │
+         ▼
+  ┌──────────────────┐
+  │ Step 1: 表格扫描  │  遍历所有 table → 逐行逐列识别
+  │ _scan_tables()   │  
+  └────────┬─────────┘
+           │
+  ┌────────▼─────────┐
+  │ Step 2: 段落扫描  │  检测正文中的"标签+下划线"字段
+  │ _scan_paragraph  │  如 "教材名称______"
+  │ _underline_fields│
+  └────────┬─────────┘
+           │
+  ┌────────▼─────────┐
+  │ Step 3: 标签提取  │  从每个单元格中提取标签文字
+  │ _extract_labels  │  处理"标签（填写说明）"模式
+  │ _from_cell()     │
+  └────────┬─────────┘
+           │
+  ┌────────▼─────────┐
+  │ Step 4: 去重合并  │  移除重复字段、合并相邻标签
+  │ _deduplicate()   │
+  └────────┬─────────┘
+           │
+  ┌────────▼─────────┐
+  │ Step 5: 过滤      │  剔除黑名单、选项词、纯数字
+  │ _filter()        │  识别 fill_mode（set/append/
+  └────────┬─────────┘  replace/check/group）
+           │
+           ▼
+  输出：字段清单 JSON
 ```
 
-**6个注册工具：**
-1. `list_templates` — 列出内置模板
-2. `analyze_report_template` — 分析内置模板字段
-3. `generate_edu_report` — 生成内置模板文档
-4. `analyze_uploaded_template` — 分析上传模板字段
-5. `generate_from_template` — 生成上传模板文档
-6. `parse_knowledge_file` — 从知识文件提取字段值
-
-**短期记忆：** 滑动窗口保留最近20轮对话（40条消息）
-
----
-
-### 2.3 template_analyzer.py — 模板解析器（635行）
-
-**核心函数：** `analyze_template(path) → {label_fields, row_groups, checkbox_rows}`
-
-**3种字段识别模式：**
+**支持的 6 种字段模式**：
 
 | 模式 | 示例 | fill_mode |
-|---|---|---|
-| label_blank | `|课程名称|[空白]|` | set |
-| colon | `课程名称：` | append |
-| placeholder | `%` | replace |
+|------|------|-----------|
+| 标签+空白格 | `课程名称` `[_]` | `append` |
+| 标签+占位符 | `题号` `[%]` | `set` |
+| 标签+填写说明 | `主要教学经历（授课名称、起止时间...）` | `replace` |
+| 多列数据行 | 表头下有空白行 | `group` |
+| 勾选框行 | 必修/选修 选项行 | `check` |
+| 段落下划线 | `教材名称______` | `paragraph_underline` |
 
-**关键子函数：**
-- `_is_label_cell()` — 判断标签格（2-15字，非数字，非选项词）
-- `_is_placeholder_cell()` — 判断占位符格（%等）
-- `_is_vmerge_continue()` — 判断vMerge延续格
-- `_detect_multi_column_fields()` — 识别多列行组
-- `_scan_table_data_sections()` — 扫描表格数据区
+### 2.2 文档生成引擎 (`edu_report_tool.py` — 1767 行)
 
----
+**职责**：接收字段值，填充 Word 模板并生成文档。
 
-### 2.4 edu_report_tool.py — 文档生成工具（1286行）
-
-#### 6个 @tool 工具
-
-| 工具 | 参数 | 返回 |
-|---|---|---|
-| `list_templates()` | 无 | 3个模板名+文件路径 |
-| `analyze_report_template(template_name)` | 模板名 | 简化字段列表 |
-| `generate_edu_report(template_name, report_data)` | 模板名+JSON数据 | 下载链接 |
-| `analyze_uploaded_template(file_path)` | 文件路径 | 归组字段列表 |
-| `generate_from_template(file_path, report_data)` | 路径+JSON数据 | 下载链接 |
-| — | — | — |
-
-#### 格式保留核心
+**两条生成流程**：
 
 ```
-_set_tc_text(tc, text, rPr_source=None)
-  ├── 修改已有run: 保留原rPr，只改w:t文本
-  ├── 空白格: 从rPr_source继承格式（字体/字号/加粗）
-  └── 保留: tcPr(单元格属性) + pPr(段落属性)
+内置模板路径：
+  generate_edu_report(template_name, report_data)
+      │
+      ▼
+  _get_template_path(name) → 内置模板文件
+      │
+      ▼
+  _build_report_docx(template, data)
+      │
+      ├─ analyze_template()        → 解析字段
+      ├─ _build_field_id_value_map → 用户数据→字段ID映射
+      ├─ _fill_label_fields()      → 填充普通字段
+      ├─ _fill_paragraph_fields()  → 填充段落下划线字段
+      ├─ _fill_simple_row_groups() → 填充数据行组
+      ├─ _fill_checkbox_rows()     → 填充勾选框行
+      ├─ fix_docx()                → 自动修复结构
+      ├─ validate_doc()            → 校验+Diff
+      └─ upload_to_s3()            → 上传存储
 
-_find_label_rPr_in_row(tr) → 从同行找第一个有rPr的标签格
+自定义模板路径：
+  generate_from_template(file_path, report_data)
+      │
+      ▼
+  _fill_custom_template(template, data)
+      │ （同上流程，仅模板来源不同）
 ```
 
-#### 两条填充路径
+**填充策略**：
 
-**内置模板路径：**
-```
-generate_edu_report
-  → _expand_report_data()      # 用户数据→内部子字段（考勤/分数展开）
-  → _build_report_docx()
-      ├── _fill_label_fields()      # 标签字段填充
-      ├── _fill_simple_row_groups() # 行组填充（vMerge安全）
-      └── _fill_checkbox_rows()     # 勾选框行自动打√
-  → S3上传 → 返回下载链接
-```
+- **复用 XML 结构**：不创建新 run，只修改现有 run 的文本，保证格式不变
+- **安全守卫**：填充前检查字段类型，跳过不匹配的填充模式
+- **文本清理**：`sanitize_fill_text()` 清理控制字符和 XML 特殊字符
+- **行组扩展**：当数据行数超过模板预留行时，自动克隆行
 
-**通用模板路径：**
-```
-generate_from_template
-  → _expand_generic_data()     # 归组数据展开为内部子字段
-  → _fill_custom_template()
-      ├── _fill_label_fields()
-      ├── _fill_simple_row_groups()
-      └── _fill_checkbox_rows()
-  → S3上传 → 返回下载链接
-```
+### 2.3 校验与对比模块 (`docx_validator.py` — 747 行)
 
-#### 字段简化
-
-| 函数 | 用途 | 效果 |
-|---|---|---|
-| `_simplify_fields()` | 内置模板 | 硬编码映射，45→18字段 |
-| `_simplify_generic_fields()` | 通用模板 | 前缀自动归组，92→21字段 |
-
-#### 勾选框检测
+**7 层校验管线**：
 
 ```
-_detect_checkbox_row(unique_cells)
-  → 识别"选项+空白格"行（如 必修√ 选修□）
-  → 返回 {label, option_blanks: {选项: 列索引}}
-
-_fill_checkbox_rows_in_table(doc, data, analysis)
-  → 遍历所有行，检测勾选框行
-  → 根据用户值在正确选项后打√
+validate_docx(doc)
+    │
+    ├─ 1. 结构完整性    → 检查文档是否可正常打开、有无损坏
+    ├─ 2. 元素顺序      → 检查 OpenXML 子元素顺序合规
+    ├─ 3. 单元格段落    → 每个	tc 至少包含一个 p
+    ├─ 4. 合并单元格    → 检测合并单元格连续性
+    ├─ 5. 表格维度      → 对比模板与生成文档的行列数
+    ├─ 6. sectPr 位置   → sectPr 必须是 body 最后子元素
+    └─ 7. 格式污染      → 检测直连格式属性污染风险
 ```
 
----
-
-### 2.5 knowledge_tool.py — 知识文件提取（435行）
-
-**双引擎提取：**
+**Diff 对比**：
 
 ```
-parse_knowledge_file(file_path, required_fields)
-  ├── _extract_text_from_file()     # 读取docx/pdf/txt内容
-  ├── _rule_extract_fields()        # 规则匹配（快、免费）
-  │   ├── 20+别名映射（学时数→总学时/学时/课时）
-  │   ├── 5种匹配模式（管道符/冒号/等号/是/逗号）
-  │   └── 返回: {字段: 值}
-  ├── _llm_extract_fields()         # LLM提取（准、理解语义）
-  │   ├── DeepSeek ChatOpenAI
-  │   ├── 提示词: 根据字段列表从文本提取值
-  │   └── 返回: {字段: 值}
-  └── 合并: 规则结果 + LLM补充（LLM覆盖规则）
+diff_docx(template_path, filled_path)
+    │
+    ├─ 对比每个表格的每个单元格文本
+    ├─ 标记为 filled / still_empty / changed_structure
+    └─ 输出填写率摘要 + 详细字段清单
 ```
 
----
-
-### 2.6 前端 index.html（1203行）
+**自动修复**：
 
 ```
-┌─────────────────────────────────────────────────┐
-│  教务文档助手                                      │
-├──────────────┬──────────────────────────────────┤
-│  聊天面板     │  文档预览区                        │
-│  (左侧40%)   │  (右侧60%)                        │
-│              │                                    │
-│  AI消息气泡   │  ┌──────────────────────────────┐ │
-│  用户消息     │  │  基本信息                      │ │
-│              │  │  课程名称: 待填写              │ │
-│  ┌─────────┐│  │  课程代码: 待填写              │ │
-│  │内置模板  ││  │  ...                          │ │
-│  │上传模板  ││  └──────────────────────────────┘ │
-│  │人机协同  ││                                    │
-│  │知识上传  ││                                    │
-│  └─────────┘│                                    │
-│              │                                    │
-│  [输入消息]   │                                    │
-└──────────────┴──────────────────────────────────┘
+fix_docx(path)
+    │
+    ├─ 修复缺少段落的单元格（插入空 <w:p>）
+    ├─ 修复元素顺序错乱（按 OpenXML 规范重排）
+    └─ 合并相邻的连续 run（减少碎片）
 ```
 
-**4个功能按钮：**
-1. 🏛️ 内置模板 → 选择评价报告/试卷分析/关联矩阵
-2. 📄 上传模板 → 上传任意.docx文件
-3. ✍️ 人机协同编写（开发中）
-4. 📎 知识文件上传 → 自动提取字段信息
+### 2.4 AI 预填工具 (`prefill_tool.py` — 660 行)
 
----
+**预填流程**：
+
+```
+prefill_from_file_paths(file_paths, template_path)
+    │
+    ├─ 1. 解析知识文件内容（复用 knowledge_tool）
+    ├─ 2. 解析模板字段清单（复用 template_analyzer）
+    │
+    ├─ 3. LLM 智能提取
+    │     └─ 构造 Prompt → LLM 返回 {label, value, confidence, source}
+    │
+    ├─ 4. 规则匹配兜底
+    │     └─ 正则匹配字段名→值（速度更快，覆盖常见模式）
+    │
+    ├─ 5. 合并结果
+    │     └─ 同一字段取置信度最高的值
+    │
+    └─ 6. 三色分类
+          ├─ confidence ≥ 0.8 → confirmed（绿）
+          ├─ confidence ≥ 0.4 → review（黄）
+          └─ confidence < 0.4 → empty（灰）
+```
+
+**多文件合并策略**：
+- 每个文件独立提取 → 合并取最高置信度
+- 同一字段多个文件值冲突 → 降级为 review
+
+### 2.5 前端 (`web/index.html` — 2591 行)
+
+**两种交互模式**：
+
+```
+对话模式（默认）：
+  ┌────────────┬──────────────┐
+  │  聊天窗口   │   文档预览    │
+  │  Agent 问答 │   实时更新    │
+  └────────────┴──────────────┘
+
+人机协同模式：
+  ┌────────────┬──────────────┐
+  │  字段审核   │   文档预览    │
+  │  🟢🟡⬜    │   实时更新    │
+  │  进度条     │              │
+  ├────────────┴──────────────┤
+  │ [取消] [交给AI] [确认生成]  │
+  └───────────────────────────┘
+```
+
+**核心交互机制**：
+
+- `[FIELDS]...[/FIELDS]` 回显：Agent 回显字段值，前端解析后实时更新预览区
+- 预览区保护：生成时不替换预览 DOM，用叠加遮罩 + 单元格文本更新
+- 文件上传：支持多文件选择，FormData 批量提交
+- 预填审核：三色卡片 + 进度条 + 一键确认
+
+### 2.6 Web 服务 (`src/main.py` — 919 行)
+
+**API 架构**：
+
+```
+                    ┌─ /run (同步)
+                    ├─ /stream_run (SSE 流式)
+Agent 调用 ─────────┤
+                    ├─ /cancel/{id}
+                    └─ /v1/chat/completions (OpenAI 兼容)
+
+                    ├─ /upload (多文件)
+文件管理 ───────────┤
+                    └─ /upload-template (单文件)
+
+                    ├─ /prefill (AI 预填)
+预填/预览 ──────────┤
+                    ├─ /template-preview
+                    ├─ /generated-preview
+                    ├─ /download-docx
+                    └─ /convert-pdf
+```
+
+**安全防护**：
+
+- `_safe_path()`：白名单路径校验，阻止路径遍历
+- 文件大小限制：上传最大 10MB
+- CORS：允许所有来源（开发模式）
 
 ## 三、数据流
 
+### 3.1 完整对话流程
+
 ```
-用户输入
-  │
-  ▼
-main.py (/chat)
-  │
-  ▼
-agent.py (create_agent + LLM)
-  │
-  ├─── list_templates ──────→ TEMPLATE_REGISTRY ──→ assets/*.docx
-  │
-  ├─── analyze_report_template ──→ template_analyzer ──→ _simplify_fields() ──→ 18字段
-  │
-  ├─── generate_edu_report ──→ _expand_report_data() + _build_report_docx()
-  │                              ──→ S3上传 ──→ 下载链接
-  │
-  ├─── analyze_uploaded_template ──→ template_analyzer ──→ _simplify_generic_fields() ──→ 21字段
-  │
-  ├─── generate_from_template ──→ _expand_generic_data() + _fill_custom_template()
-  │                               ──→ S3上传 ──→ 下载链接
-  │
-  └─── parse_knowledge_file ──→ _rule_extract() + _llm_extract() ──→ {字段: 值}
-```
-
----
-
-## 四、模型配置
-
-| 模块 | 内置模式 | 外部模式（.env） |
-|---|---|---|
-| Agent主LLM | doubao-seed-1-6-251015 | DeepSeek V4 Pro |
-| 知识文件提取 | doubao-seed-1-6-lite | DeepSeek V4 Pro |
-
-**.env 配置项：**
-```
-EXTERNAL_LLM_API_KEY=sk-xxx       # API密钥
-EXTERNAL_LLM_BASE_URL=https://api.deepseek.com  # API地址
-EXTERNAL_LLM_MODEL=deepseek-v4-pro  # 模型名
+用户选择模板
+    │
+    ▼
+Agent 调用 analyze_report_template("评价报告")
+    │
+    ▼
+template_analyzer.analyze_template(doc)
+    │ → 解析出 93 个字段
+    │ → 分类：22 个普通字段 + 4 个数据行组 + 勾选行 + 段落字段
+    │
+    ▼
+Agent 分批询问（每批 2-3 个字段）
+    │ 用户回答 → Agent 回显 [FIELDS]...[/FIELDS]
+    │ → 前端解析 → 更新预览区对应单元格
+    │
+    ▼ （用户可能上传知识文件）
+Agent 调用 parse_knowledge_file / prefill_from_knowledge
+    │ → 从文件提取字段值
+    │ → Agent 回显预填结果
+    │
+    ▼ （所有字段收集完毕）
+Agent 调用 generate_edu_report(template_name, report_data)
+    │
+    ▼
+_build_report_docx(template, data)
+    ├─ 解析字段 → 映射值 → 填充各类字段
+    ├─ fix_docx() → 自动修复
+    ├─ validate_doc() → 7 层校验 + Diff
+    └─ upload_to_s3() → 返回下载 URL
 ```
 
----
+### 3.2 预填流程
+
+```
+用户上传知识文件
+    │
+    ▼
+前端调用 POST /prefill { file_paths, template_path }
+    │
+    ▼
+prefill_from_file_paths(paths, template)
+    ├─ 解析文件内容
+    ├─ 解析模板字段
+    ├─ LLM 提取 + 规则匹配
+    └─ 合并 + 三色分类
+    │
+    ▼
+前端渲染审核面板
+    │ 用户确认/修正
+    │
+    ▼
+前端调用 Agent 生成（传入审核后的字段值）
+```
+
+## 四、状态管理
+
+### 4.1 Agent 记忆
+
+```python
+# agent.py — 滑动窗口机制
+MAX_MESSAGES = 40  # 保留最近 40 条消息（约 10-15 轮对话）
+
+class AgentState(MessagesState):
+    messages: Annotated[list[AnyMessage], _windowed_messages]
+
+# 窗口裁剪时：
+# 1. 丢弃最老的消息
+# 2. 清理 reasoning_content（防止序列化错误）
+# 3. 修复孤立的 ToolMessage（保持 tool_calls 关联）
+```
+
+### 4.2 前端状态
+
+```
+字段映射 fieldMap = {
+    "课程名称": { existing_value: "数据结构", field_id: "T0_R0_C0_L0" },
+    ...
+}
+
+预填数据 prefillResult = {
+    fields: [...],
+    summary: "...",
+    fill_rate: 0.6,
+    ...
+}
+```
 
 ## 五、关键设计决策
 
-1. **格式100%保留**：`_set_tc_text` 优先修改已有 `w:r` 的 `w:t`，不删除重建；空白格从同行标签格继承 `rPr`
-2. **vMerge安全填充**：使用 `row._tr.findall(qn('w:tc'))` 获取每行独立tc元素，continue格消耗索引但不填值
-3. **字段归组**：通用模板用前缀自动归组，内置模板用硬编码映射
-4. **双引擎知识提取**：先规则匹配（快），再LLM补充（准）
-5. **DeepSeek兼容**：`_strip_reasoning` 中间件清理 `reasoning_content`
-6. **勾选框自动打√**：`_detect_checkbox_row` 识别选项行，在正确选项后填入√
+### 5.1 为什么复用 XML 结构而不是创建新元素？
+
+填充 Word 文档有两种策略：
+- **创建新 run**：简单但丢失格式（字体、颜色、对齐方式）
+- **复用现有 run**：只修改 `<w:t>` 文本节点，格式完整保留
+
+本项目选择复用，因为教务文档对格式要求严格（表格边框、字体大小、单元格对齐）。
+
+### 5.2 为什么模板解析不依赖 LLM？
+
+模板解析是确定性任务（"这个单元格是不是空的？"），用规则算法更可靠：
+- 速度快：解析 93 个字段 < 1 秒（LLM 需要 5-10 秒）
+- 零幻觉：不会把非空单元格误判为待填
+- 可调试：每个判断步骤都有明确规则
+
+LLM 只用于需要语义理解的任务（知识文件提取、字段值推断）。
+
+### 5.3 为什么前端用单文件 HTML 而不是 React/Vue？
+
+- 部署简单：一个文件，无需构建
+- 调试方便：浏览器直接查看源码
+- 足够用：本项目的交互复杂度不需要框架
+
+## 六、已知限制与改进方向
+
+| 限制 | 说明 | 优先级 |
+|------|------|--------|
+| 记忆窗口有限 | 40 条消息后早期信息丢失 | P1 |
+| 无会话恢复 | 刷新页面丢失所有数据 | P1 |
+| prefill 无超时 | LLM 调用卡住时无重试 | P1 |
+| 零测试覆盖 | tests/ 目录为空 | P2 |
+| 无认证机制 | API 端点无需认证 | P2 |
+| 移动端不适配 | 核心布局在手机上挤压 | P3 |
+
+## 七、代码规模
+
+| 模块 | 文件 | 行数 | 职责 |
+|------|------|------|------|
+| 模板解析 | `template_analyzer.py` | 1169 | 字段识别引擎 |
+| 文档生成 | `edu_report_tool.py` | 1767 | 填充+校验+导出 |
+| 文档校验 | `docx_validator.py` | 747 | 校验/对比/修复 |
+| AI 预填 | `prefill_tool.py` | 660 | 知识文件→字段值 |
+| 文档预览 | `docx_preview.py` | 395 | docx→HTML 渲染 |
+| 知识解析 | `knowledge_tool.py` | 572 | 文件提取+LLM 提取 |
+| Web 服务 | `main.py` | 919 | API 路由+安全防护 |
+| Agent | `agent.py` | 160 | LangGraph 状态机 |
+| 前端 | `index.html` | 2591 | SPA 交互界面 |
+| **合计** | | **8980** | |
