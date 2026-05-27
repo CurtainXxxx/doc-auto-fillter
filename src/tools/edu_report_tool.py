@@ -12,16 +12,16 @@ from docx import Document
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from langchain.tools import tool
+from tools.docx_upload import upload_and_validate
 
 from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import new_context
 from storage.memory.memory_saver import get_memory_saver
 
 from tools.template_analyzer import analyze_template
-from tools.docx_validator import (
-    validate_docx, diff_docx, fix_docx, strip_inline_formatting, sanitize_fill_text,
-)
+from tools.docx_validator import strip_inline_formatting, sanitize_fill_text
 from tools.form_filling_state import FormFillingState
+from tools.docx_upload import upload_and_validate, validate_doc
 
 
 # ── 分析结果缓存 ──
@@ -1841,36 +1841,8 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         # 生成文档（传入已有的analysis_result避免二次分析）
         docx_bytes, analysis, expanded_data, rg_field_values = _build_report_docx(path, data, analysis_result=cached_analysis)
         
-        # 上传到对象存储
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-        import time
-        
-        storage = S3SyncStorage(
-            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
-            access_key="",
-            secret_key="",
-            bucket_name=os.getenv("COZE_BUCKET_NAME"),
-            region="cn-beijing",
-        )
-        
-        timestamp = time.strftime("%Y%m%d%H%M%S")
-        safe_name = template_name.replace(" ", "_")
-        file_name = f"edu_report/{safe_name}_{timestamp}.docx"
-        
-        file_key = storage.upload_file(
-            file_content=docx_bytes,
-            file_name=file_name,
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        url = storage.generate_presigned_url(key=file_key, expire_time=86400)
-        
-        # 保存本地副本供打印转PDF使用
-        local_path = os.path.join("/tmp", os.path.basename(file_name))
-        with open(local_path, "wb") as lf:
-            lf.write(docx_bytes)
-
-        # 生成后文档校验
-        validation = validate_doc(path, local_path)
+        # 上传到对象存储 + 保存本地 + 校验
+        upload_result = upload_and_validate(docx_bytes, "edu_report", template_name, path)
 
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
@@ -1880,23 +1852,23 @@ def generate_edu_report(template_name: str, report_data: str) -> str:
         result = {
             "success": True,
             "message": "报告已成功生成并上传",
-            "file_name": file_name,
-            "download_url": url,
-            "local_path": local_path,
+            "file_name": upload_result["file_name"],
+            "download_url": upload_result["download_url"],
+            "local_path": upload_result["local_path"],
             "filled_data": filled_data,
             "filled_field_values": filled_field_values,
-            "validation": validation,
+            "validation": upload_result["validation"],
         }
 
         # 如果校验发现硬伤，标记但不阻断（前端可提示用户）
-        if not validation["valid"]:
-            result["message"] = f"报告已生成，但存在结构问题: {'; '.join(validation['errors'])}"
+        if not upload_result["validation"]["valid"]:
+            result["message"] = f"报告已生成，但存在结构问题: {'; '.join(upload_result['validation']['errors'])}"
 
         # 附加diff摘要信息
-        if validation.get("diff"):
-            result["diff_summary"] = validation["diff"]["summary"]
-            result["diff_filled_count"] = len(validation["diff"]["filled"])
-            result["diff_still_empty_count"] = len(validation["diff"]["still_empty"])
+        if upload_result["validation"].get("diff"):
+            result["diff_summary"] = upload_result["validation"]["diff"]["summary"]
+            result["diff_filled_count"] = len(upload_result["validation"]["diff"]["filled"])
+            result["diff_still_empty_count"] = len(upload_result["validation"]["diff"]["still_empty"])
 
         return json.dumps(result, ensure_ascii=False)
         
@@ -2014,61 +1986,34 @@ def generate_from_template(file_path: str, report_data: str) -> str:
         # 通用模板：直接填充，不调用expand（保留原格式），传入analysis_result避免二次分析
         doc_bytes, analysis, expanded_data, rg_field_values = _fill_custom_template(full_path, data, analysis_result=cached_analysis)
         
-        # 上传到对象存储
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-        import time
-        
-        storage = S3SyncStorage(
-            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
-            access_key="",
-            secret_key="",
-            bucket_name=os.getenv("COZE_BUCKET_NAME"),
-            region="cn-beijing",
-        )
-        
-        timestamp = time.strftime("%Y%m%d%H%M%S")
-        safe_name = os.path.splitext(os.path.basename(full_path))[0].replace(" ", "_")
-        file_name = f"custom_report/{safe_name}_{timestamp}.docx"
-        
-        file_key = storage.upload_file(
-            file_content=doc_bytes,
-            file_name=file_name,
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        url = storage.generate_presigned_url(key=file_key, expire_time=86400)
-        
-        # 保存本地副本供打印转PDF使用
-        local_path = os.path.join("/tmp", os.path.basename(file_name))
-        with open(local_path, "wb") as lf:
-            lf.write(doc_bytes)
+        # 上传到对象存储 + 保存本地 + 校验
+        display_name = os.path.splitext(os.path.basename(full_path))[0]
+        upload_result = upload_and_validate(doc_bytes, "custom_report", display_name, full_path)
 
         # 提取非空字段数据供前端更新预览
         filled_data = {k: v for k, v in data.items() if v and str(v).strip()}
         filled_field_values = _build_field_id_value_map(analysis["label_fields"], expanded_data)
         filled_field_values.update(rg_field_values)  # 合并行组field_id映射
 
-        # 生成后文档校验
-        validation = validate_doc(full_path, local_path)
-
         result = {
             "success": True,
             "message": "文档已成功生成并上传",
-            "file_name": file_key,
-            "download_url": url,
-            "local_path": local_path,
+            "file_name": upload_result["file_name"],
+            "download_url": upload_result["download_url"],
+            "local_path": upload_result["local_path"],
             "filled_data": filled_data,
             "filled_field_values": filled_field_values,
-            "validation": validation,
+            "validation": upload_result["validation"],
         }
 
-        if not validation["valid"]:
-            result["message"] = f"文档已生成，但存在结构问题: {'; '.join(validation['errors'])}"
+        if not upload_result["validation"]["valid"]:
+            result["message"] = f"文档已生成，但存在结构问题: {'; '.join(upload_result['validation']['errors'])}"
 
         # 附加diff摘要信息
-        if validation.get("diff"):
-            result["diff_summary"] = validation["diff"]["summary"]
-            result["diff_filled_count"] = len(validation["diff"]["filled"])
-            result["diff_still_empty_count"] = len(validation["diff"]["still_empty"])
+        if upload_result["validation"].get("diff"):
+            result["diff_summary"] = upload_result["validation"]["diff"]["summary"]
+            result["diff_filled_count"] = len(upload_result["validation"]["diff"]["filled"])
+            result["diff_still_empty_count"] = len(upload_result["validation"]["diff"]["still_empty"])
 
         return json.dumps(result, ensure_ascii=False)
         
@@ -2214,8 +2159,6 @@ def generate_form_document(session_id: str) -> str:
         session_id: 会话ID
     """
     try:
-        import time as _time
-
         state = _active_form_states.get(session_id)
         if not state:
             return json.dumps({"success": False, "message": "表单状态不存在"}, ensure_ascii=False)
@@ -2240,50 +2183,24 @@ def generate_form_document(session_id: str) -> str:
         else:
             docx_bytes, _, _, _ = _fill_custom_template(template_path, filled_values, analysis_result=analysis)
 
-        # 上传到对象存储
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-
-        storage = S3SyncStorage(
-            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
-            access_key="",
-            secret_key="",
-            bucket_name=os.getenv("COZE_BUCKET_NAME"),
-            region="cn-beijing",
-        )
-
-        timestamp = _time.strftime("%Y%m%d%H%M%S")
-        safe_name = (state.template_name or "form").replace(" ", "_")
-        file_name = f"edu_form/{safe_name}_{timestamp}.docx"
-
-        file_key = storage.upload_file(
-            file_content=docx_bytes,
-            file_name=file_name,
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        url = storage.generate_presigned_url(key=file_key, expire_time=86400)
-
-        # 保存本地副本
-        local_path = os.path.join("/tmp", os.path.basename(file_name))
-        with open(local_path, "wb") as f:
-            f.write(docx_bytes)
-
-        # 校验
-        validation = validate_doc(template_path, local_path)
+        # 上传到对象存储 + 保存本地 + 校验
+        display_name = state.template_name or "form"
+        upload_result = upload_and_validate(docx_bytes, "edu_form", display_name, template_path)
 
         summary = state.get_summary()
         result = {
             "success": True,
             "message": f"文档已生成，填写率{round(summary['filled_count']/max(summary['total_fields'],1)*100, 1)}%",
-            "download_url": url,
-            "local_path": local_path,
+            "download_url": upload_result["download_url"],
+            "local_path": upload_result["local_path"],
             "progress": summary,
-            "validation": validation,
+            "validation": upload_result["validation"],
         }
 
-        if validation.get("diff"):
-            result["diff_summary"] = validation["diff"]["summary"]
-            result["diff_filled_count"] = len(validation["diff"]["filled"])
-            result["diff_still_empty_count"] = len(validation["diff"]["still_empty"])
+        if upload_result["validation"].get("diff"):
+            result["diff_summary"] = upload_result["validation"]["diff"]["summary"]
+            result["diff_filled_count"] = len(upload_result["validation"]["diff"]["filled"])
+            result["diff_still_empty_count"] = len(upload_result["validation"]["diff"]["still_empty"])
 
         return json.dumps(result, ensure_ascii=False)
 
