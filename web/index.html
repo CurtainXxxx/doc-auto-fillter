@@ -2341,17 +2341,20 @@ async function handleFileUpload(event) {
         return;
       }
 
-      // 普通模式：合并所有文件内容发给Agent
+      // 普通模式：合并所有文件内容发给Agent（同时传文件路径，让Agent可以调用工具分析）
       const fileParts = [];
+      const filePaths = [];
       for (const f of result.files) {
         if (f.success && f.extracted_text) {
+          filePaths.push(f.file_path);
           fileParts.push(`=== 文件：${f.filename} ===\n${f.extracted_text.substring(0, 4000)}`);
         } else if (!f.success) {
           fileParts.push(`=== 文件：${f.filename} ===\n[解析失败: ${f.error || '未知错误'}]`);
         }
       }
       if (fileParts.length > 0) {
-        const agentMsg = `我上传了${result.file_count}个文件，以下是各文件内容，请从中提取填写文档所需的信息：\n\n${fileParts.join('\n\n')}`;
+        const pathsSection = filePaths.length > 0 ? `\n【文件路径（重要！请用这些路径调用工具）】\n${filePaths.map((p, i) => `文件${i+1}: ${p}`).join('\n')}\n` : '';
+        const agentMsg = `我上传了${result.file_count}个文件。${pathsSection}\n请用analyze_uploaded_template或extract_from_old_report工具，传入上面的文件路径来分析。文件文本内容如下仅供参考：\n\n${fileParts.join('\n\n')}`;
         await callAgent(agentMsg);
       } else {
         appendMessage('assistant', `所有文件解析失败，请尝试其他格式或直接输入信息。`);
@@ -2367,7 +2370,7 @@ async function handleFileUpload(event) {
       }
 
       if (result.success && result.extracted_text) {
-        const agentMsg = `我上传了文件"${result.filename}"，以下是文件内容，请从中提取填写文档所需的信息：\n\n${result.extracted_text.substring(0, 3000)}`;
+        const agentMsg = `我上传了文件"${result.filename}"。\n\n【文件路径（重要！请用这个路径调用工具）】\n${result.file_path}\n\n请用analyze_uploaded_template或extract_from_old_report工具，传入上面的文件路径来分析。文件文本内容如下仅供参考：\n\n${result.extracted_text.substring(0, 3000)}`;
         await callAgent(agentMsg);
       } else {
         appendMessage('assistant', `文件解析失败：${result.error || '未知错误'}，请尝试其他格式或直接输入信息。`);
