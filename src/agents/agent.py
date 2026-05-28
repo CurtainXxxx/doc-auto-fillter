@@ -25,6 +25,11 @@ from tools.edu_report_tool import (
 )
 from tools.knowledge_tool import parse_knowledge_file, extract_facts
 from tools.prefill_tool import prefill_from_knowledge, prefill_from_multiple_knowledge
+from tools.old_report_extractor import (
+    extract_from_old_report, prefill_from_old_report, get_fill_checklist,
+    inject_form_states as _inject_form_states,
+)
+from tools.edu_report_tool import _active_form_states
 
 LLM_CONFIG = "config/agent_llm_config.json"
 
@@ -149,13 +154,17 @@ def build_agent(ctx=None):
         default_headers=default_headers(ctx) if ctx and not ext_api_key else {},
     )
 
+    # 注入共享状态，让 old_report_extractor 能访问 edu_report_tool 的会话
+    _inject_form_states(_active_form_states)
+
     return create_agent(
         model=llm,
         system_prompt=cfg.get("sp"),
         tools=[list_templates, analyze_report_template, generate_edu_report,
                parse_knowledge_file, extract_facts, analyze_uploaded_template, generate_from_template,
                prefill_from_knowledge, prefill_from_multiple_knowledge,
-               init_form_filling, get_form_status, update_form_fields, generate_form_document],
+               init_form_filling, get_form_status, update_form_fields, generate_form_document,
+               extract_from_old_report, prefill_from_old_report, get_fill_checklist],
         checkpointer=get_memory_saver(),
         state_schema=AgentState,
         middleware=[handle_tool_errors, sanitize_before_llm],
