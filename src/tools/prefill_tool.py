@@ -169,23 +169,33 @@ def _llm_prefill_fields(field_list: list, file_content: str, ctx=None) -> list:
 
 
 def _call_llm(system_prompt: str, user_prompt: str, ctx=None) -> str:
-    """调用LLM，支持外部API和平台内置LLM。"""
+    """调用LLM，支持外部API和平台内置LLM。带重试逻辑。"""
+    import time
     ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
     ext_base_url = os.getenv("EXTERNAL_LLM_BASE_URL")
 
     if ext_api_key and ext_base_url:
         from langchain_openai import ChatOpenAI
         ext_model = os.getenv("EXTERNAL_LLM_MODEL", "deepseek-chat")
-        ext_llm = ChatOpenAI(
-            model=ext_model,
-            api_key=ext_api_key,
-            base_url=ext_base_url,
-            temperature=0.1,
-            max_tokens=4096,
-        )
         from langchain_core.messages import SystemMessage as SM, HumanMessage as HM
-        response = ext_llm.invoke([SM(content=system_prompt), HM(content=user_prompt)])
-        return response.content
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                ext_llm = ChatOpenAI(
+                    model=ext_model,
+                    api_key=ext_api_key,
+                    base_url=ext_base_url,
+                    temperature=0.1,
+                    max_tokens=4096,
+                )
+                response = ext_llm.invoke([SM(content=system_prompt), HM(content=user_prompt)])
+                return response.content
+            except Exception as e:
+                last_error = e
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))  # 退避: 2s, 4s
+        raise last_error
     else:
         from coze_coding_dev_sdk import LLMClient
         client = LLMClient(ctx=ctx)

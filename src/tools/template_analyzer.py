@@ -192,8 +192,11 @@ def _is_label_cell(cell) -> bool:
     text = cell.text.strip()
     if not text:
         return False
-    # 太长的不算标签
+    # 太长的不算标签（段落文本等）
     if len(text) > 15:
+        return False
+    # 纯空格分隔的多个词（如"课程目标 达成度 评价"），取首段判断
+    if '  ' in text or '　' in text:
         return False
     # 含冒号的由冒号模式处理
     if '：' in text or ':' in text:
@@ -409,6 +412,9 @@ def analyze_template(template_path: str) -> dict:
             for c_idx, cell in enumerate(unique):
                 labels = _extract_labels_from_cell(cell)
                 for line_idx, (label, existing_value) in enumerate(labels):
+                    # 过滤掉过长的"标签"（实际是段落文本，如课程教学目标描述）
+                    if len(label) > 25:
+                        continue
                     field_id = f"T{t_idx}_R{r_idx}_C{c_idx}_L{line_idx}"
                     # 如果有section上下文，用"section标题-label"格式区分
                     display_label = label
@@ -934,13 +940,18 @@ def _detect_multi_column_fields(table, t_idx: int, r_idx: int, unique_cells: lis
     for ci, cell in enumerate(unique_cells):
         if _is_vmerge_continue(cell):
             continue
-        
+
         text = cell.text.strip()
-        
+
         # 第一个非空非选项格作为行标签
-        if row_label is None and text and _is_label_cell(cell):
-            row_label = text
-            continue
+        if row_label is None and text:
+            if _is_label_cell(cell):
+                row_label = text
+                continue
+            # 纯数字也作为行标签（如关联矩阵中的题号1,2,3...）
+            if re.match(r'^[\d]+$', text):
+                row_label = f"题{text}"  # 给数字标签添加语义前缀
+                continue
         
         # 跳过已被label_blank模式识别的格
         if (t_idx, r_idx, ci) in covered_cells:
@@ -1139,49 +1150,61 @@ def _build_col_header_map(table, row_idx: int, unique_cells: list) -> dict:
 
 def _get_column_labels_for_row(table, t_idx: int, r_idx: int, unique_cells: list, fillable_cells: list) -> list:
     """获取待填格对应的列标签（从上方表头行获取）
-    
-    改进：支持合并单元格表头——当上方行的某个格横跨多列时，
-    该格的文本作为所有被横跨列的标签。
+
+    改进：扫描上方多行，选择有最多有意义列标签的行（而非第一行）。
+    支持合并单元格表头。
     """
     from docx.oxml.ns import qn as _qn
-    
-    col_labels = []
-    
+
     # 计算当前行每个unique cell的gridCol起始位置
     current_grid_cols = _compute_grid_col_positions(unique_cells)
-    
-    # 向上查找表头行
-    for above_r in range(r_idx - 1, max(r_idx - 5, -1), -1):
+
+    best_labels = None
+    best_meaningful = -1
+
+    # 向上查找表头行，收集所有候选行
+    for above_r in range(r_idx - 1, max(r_idx - 10, -1), -1):
         above_unique = _get_unique_cells(table.rows[above_r])
-        if len(above_unique) < len(fillable_cells):
+        above_grid_span = sum(_get_grid_span(c) for c in above_unique)
+        if above_grid_span < len(fillable_cells):
             continue
-        
+
         # 构建上方行的列映射：grid_col → header_text
         col_header_map = _build_col_header_map(table, above_r, above_unique)
-        
+
+        candidate_labels = []
+        meaningful = 0
+
         for idx, (ci, cell, _) in enumerate(fillable_cells):
-            # 获取该fillable cell的grid列位置
             grid_col = current_grid_cols.get(ci, ci)
-            
+
             # 先尝试从col_header_map精确匹配
             header_text = col_header_map.get(grid_col)
             if header_text and header_text not in _PLACEHOLDER_TEXTS and len(header_text) <= 30:
-                col_labels.append(header_text)
+                candidate_labels.append(header_text)
+                meaningful += 1
             elif ci < len(above_unique):
                 # 回退：直接读上方行同位置格
                 above_text = above_unique[ci].text.strip().replace('\n', '')
                 if above_text and above_text not in _PLACEHOLDER_TEXTS and len(above_text) <= 30:
-                    col_labels.append(above_text)
+                    candidate_labels.append(above_text)
+                    meaningful += 1
                 else:
-                    col_labels.append(f"第{idx+1}列")
+                    candidate_labels.append(f"第{idx+1}列")
             else:
-                col_labels.append(f"第{idx+1}列")
-        
-        # 检查是否获取到有意义的标签
-        meaningful = sum(1 for l in col_labels if not l.startswith('第'))
-        if meaningful > 0:
-            return col_labels
-    
+                candidate_labels.append(f"第{idx+1}列")
+
+        # 如果大部分列都有语义标签，直接返回
+        if meaningful >= len(fillable_cells) * 0.5:
+            return candidate_labels
+
+        # 记录最佳候选
+        if meaningful > best_meaningful:
+            best_meaningful = meaningful
+            best_labels = candidate_labels
+
+    if best_labels:
+        return best_labels
     # 没找到，用序号
     return [f"第{idx+1}列" for idx in range(len(fillable_cells))]
 
