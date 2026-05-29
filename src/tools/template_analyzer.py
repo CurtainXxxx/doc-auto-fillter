@@ -95,7 +95,11 @@ def _is_empty_data_row(unique_cells) -> bool:
                            and not re.search(r'[：:]', c.text.strip())
                            and c.text.strip() not in _LABEL_BLACKLIST
                            and c.text.strip() not in _OPTION_WORDS)
-    return empty >= len(unique_cells) * 0.5 and label_count == 0 and short_label_count == 0
+    # 纯数字格（如题号"1"、"2"）表示行有实际数据内容，不是空行
+    numeric_count = sum(1 for c in unique_cells
+                       if c.text.strip() and re.match(r'^[\d]+$', c.text.strip()))
+    return (empty >= len(unique_cells) * 0.5 and label_count == 0
+            and short_label_count == 0 and numeric_count == 0)
 
 
 def _is_header_row(unique_cells) -> bool:
@@ -985,9 +989,15 @@ def _detect_multi_column_fields(table, t_idx: int, r_idx: int, unique_cells: lis
         # 这是一个多列数据行（如人数行、比例行）
         col_labels = _get_column_labels_for_row(table, t_idx, r_idx, unique_cells, fillable_cells)
         
+        # 章节标题（如"一、试卷情况"）不拼入label，放入description
+        section_like = re.match(r'^[一二三四五六七八九十]+[、，]', row_label)
+
         for idx, (ci, cell, existing) in enumerate(fillable_cells):
             col_label = col_labels[idx] if idx < len(col_labels) else f"第{idx+1}列"
-            full_label = f"{row_label}_{col_label}"
+            if section_like:
+                full_label = col_label
+            else:
+                full_label = f"{row_label}_{col_label}"
             
             # 如果col_label仍是无语义的"第N列"，尝试补充上方表头文本到description
             if col_label.startswith('第') and '列' in col_label:
@@ -1034,16 +1044,24 @@ def _detect_multi_column_fields(table, t_idx: int, r_idx: int, unique_cells: lis
         for idx, (ci, cell, existing) in enumerate(fillable_cells):
             col_label = col_labels[idx] if idx < len(col_labels) else f"第{idx+1}列"
             if above_label:
-                full_label = f"{above_label}_{col_label}"
+                # 章节标题（如"一、试卷情况"）不拼入label，放入description
+                # 否则LLM无法匹配知识文件中的简洁字段名
+                if re.match(r'^[一二三四五六七八九十]+[、，]', above_label):
+                    full_label = col_label
+                else:
+                    full_label = f"{above_label}_{col_label}"
             else:
                 full_label = f"{row_prefix}{col_label}"
-            
+
             # 如果col_label仍是无语义的"第N列"，尝试补充上方表头文本到description
             if col_label.startswith('第') and '列' in col_label:
                 specific_label = _find_specific_col_label(table, r_idx, unique_cells, ci)
                 desc = f"请填写{full_label}"
                 if specific_label:
                     desc = f"请填写{full_label}(表头:{specific_label})"
+            elif above_label and full_label == col_label:
+                # above_label被剥离了，在description中补充上下文
+                desc = f"请填写{above_label}的{col_label}"
             else:
                 desc = f"请填写{full_label}"
             
