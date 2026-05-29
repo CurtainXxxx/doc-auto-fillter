@@ -732,16 +732,8 @@ def sanitize_fill_text(text):
     if not isinstance(text, str):
         text = str(text)
 
-    # 移除XML特殊字符
-    text = text.replace('&', '&amp;')
-    text = text.replace('<', '&lt;')
-    text = text.replace('>', '&gt;')
-    # 但如果已经被转义过，不要二次转义
-    text = text.replace('&amp;amp;', '&amp;')
-    text = text.replace('&amp;lt;', '&lt;')
-    text = text.replace('&amp;gt;', '&gt;')
-
     # 移除控制字符（保留换行和制表符）
+    # 不手动转义XML：python-docx/lxml在写入XML时会自动转义<、>、&等字符
     text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
 
     return text

@@ -2,16 +2,19 @@
 本地调试入口 — 直接在终端与 Agent 对话
 
 用法:
-    uv run python local_debug.py
+    .venv/Scripts/python local_debug.py
 
 注意:
-    - 需要 .env 文件配置 DEEPSEEK_API_KEY
+    - 需要 .env 文件配置 EXTERNAL_LLM_API_KEY
     - coze_coding_utils / coze_coding_dev_sdk 在本地不可用，
       此脚本会自动 mock 这些模块
 """
 
 import os
 import sys
+
+# 确保 src/ 在 Python 路径中（agent.py 和各 tools 都在 src/ 下）
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 # ── 1. Mock 平台专属模块（必须在 import agent 之前） ──────────────
 
@@ -64,6 +67,20 @@ class _MockS3SyncStorage:
 
 _sdk_s3.S3SyncStorage = _MockS3SyncStorage
 
+# Mock LLMClient（knowledge_tool.py 条件分支中用到，本地走外部 API 不会调用）
+class _MockLLMClient:
+    """本地 mock：外部 API 路径不需要 LLMClient"""
+    def __init__(self, **kwargs):
+        pass
+
+_sdk.LLMClient = _MockLLMClient
+
+# Mock storage.memory.memory_saver（本地不需要 PostgreSQL）
+from langgraph.checkpoint.memory import MemorySaver
+_storage_memory = _make_mock_module("storage.memory.memory_saver")
+_storage_memory.get_memory_saver = lambda: MemorySaver()
+_storage_memory.MemoryManager = MagicMock()
+
 # 注册所有 mock 模块到 sys.modules
 sys.modules.update({
     "coze_coding_utils": _cozu,
@@ -76,6 +93,7 @@ sys.modules.update({
     "coze_coding_utils.helper.stream_runner": _cozu_helper_stream,
     "coze_coding_dev_sdk": _sdk,
     "coze_coding_dev_sdk.s3": _sdk_s3,
+    "storage.memory.memory_saver": _storage_memory,
 })
 
 # ── 2. 加载环境变量 ──────────────────────────────────────────

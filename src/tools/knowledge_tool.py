@@ -16,18 +16,30 @@ from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import new_context
 
 
+def _read_text_file(file_path: str) -> str:
+    """读取文本文件，自动检测编码。优先UTF-8，然后GBK/GB18030，最后用replace模式避免丢数据。"""
+    for encoding in ('utf-8', 'gbk', 'gb18030', 'latin-1'):
+        try:
+            with open(file_path, 'r', encoding=encoding) as f:
+                return f.read()
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    # 最后的兜底：用UTF-8 + replace，用�替换无法解码的字节
+    with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        return f.read()
+
+
 def _extract_text_from_file(file_path: str) -> str:
     """根据文件扩展名提取文本内容"""
     ext = os.path.splitext(file_path)[1].lower()
 
     if ext == '.txt' or ext == '.md':
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            return f.read()
+        return _read_text_file(file_path)
 
     if ext == '.csv':
         import csv
         lines = []
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
             reader = csv.reader(f)
             for row in reader:
                 lines.append(', '.join(row))

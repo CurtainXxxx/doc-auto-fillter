@@ -47,7 +47,7 @@ def _resolve_template_path(template_name_or_path: str) -> str:
     """将模板名称或路径解析为实际文件路径"""
     workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     for name, rel_path in TEMPLATE_REGISTRY.items():
-        if name in template_name_or_path:
+        if name == template_name_or_path:
             return os.path.join(workspace, rel_path)
     if os.path.exists(template_name_or_path):
         return template_name_or_path

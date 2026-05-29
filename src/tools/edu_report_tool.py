@@ -1533,12 +1533,14 @@ def _build_report_docx(template_path: str, user_data: dict, analysis_result: dic
     
     # 保存到临时文件
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
-    doc.save(tmp.name)
-    tmp.seek(0)
-    content = tmp.read()
-    tmp.close()
-    os.unlink(tmp.name)
-    
+    try:
+        doc.save(tmp.name)
+        tmp.seek(0)
+        content = tmp.read()
+    finally:
+        tmp.close()
+        os.unlink(tmp.name)
+
     return content, analysis, expanded_data, rg_field_values
 
 
@@ -1637,12 +1639,14 @@ def _fill_custom_template(template_path: str, user_data: dict, analysis_result: 
     
     # 保存
     tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
-    doc.save(tmp.name)
-    tmp.seek(0)
-    content = tmp.read()
-    tmp.close()
-    os.unlink(tmp.name)
-    
+    try:
+        doc.save(tmp.name)
+        tmp.seek(0)
+        content = tmp.read()
+    finally:
+        tmp.close()
+        os.unlink(tmp.name)
+
     return content, analysis, expanded_data, rg_field_values
 
 
@@ -1964,7 +1968,7 @@ def _resolve_template_path(template_name_or_path: str) -> str:
     # 先匹配内置模板注册表
     workspace = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     for name, rel_path in TEMPLATE_REGISTRY.items():
-        if name in template_name_or_path:
+        if name == template_name_or_path:
             return os.path.join(workspace, rel_path)
     # 再检查是否为有效文件路径
     if os.path.exists(template_name_or_path):
