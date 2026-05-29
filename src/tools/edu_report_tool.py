@@ -1654,9 +1654,11 @@ def _fill_multi_col_field(doc, field, value):
     t_idx = field["table_idx"]
     table = doc.tables[t_idx]
     
-    # value可能是逗号分隔字符串或列表
+    # value可能是逗号分隔字符串、单个数值或列表
     if isinstance(value, str):
         values = [v.strip() for v in value.replace("，", ",").split(",")]
+    elif isinstance(value, (int, float)):
+        values = [str(value)]
     else:
         values = list(value)
     
