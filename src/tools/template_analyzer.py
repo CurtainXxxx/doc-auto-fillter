@@ -633,6 +633,10 @@ def analyze_template(template_path: str) -> dict:
         section = f.get("section_context")
         if section:
             key = (f["table_idx"], f["col_idx"], section, f["label"])
+        elif f.get("pattern") == "multi_col":
+            # multi_col字段按行独立，不合并不同行的同名列
+            # 因为每行需要填不同数据（如矩阵表中每题一行）
+            key = (f["table_idx"], f["row_idx"], f["col_idx"], f["label"])
         else:
             key = (f["table_idx"], f["col_idx"], f["label"])
         if key not in label_occurrences:
@@ -1019,13 +1023,20 @@ def _detect_multi_column_fields(table, t_idx: int, r_idx: int, unique_cells: lis
         # 没有行标签，但有多个待填格
         col_labels = _get_column_labels_for_row(table, t_idx, r_idx, unique_cells, fillable_cells)
         above_label = _get_row_label_from_above(table, t_idx, r_idx)
-        
+
+        # 计算当前行在同类数据行中的序号（确保不同行的同名列标签唯一）
+        prev_data_rows = set()
+        for f in label_fields:
+            if f.get("pattern") == "multi_col" and f["table_idx"] == t_idx and f["row_idx"] < r_idx:
+                prev_data_rows.add(f["row_idx"])
+        row_prefix = f"第{len(prev_data_rows) + 1}行_"
+
         for idx, (ci, cell, existing) in enumerate(fillable_cells):
             col_label = col_labels[idx] if idx < len(col_labels) else f"第{idx+1}列"
             if above_label:
                 full_label = f"{above_label}_{col_label}"
             else:
-                full_label = col_label
+                full_label = f"{row_prefix}{col_label}"
             
             # 如果col_label仍是无语义的"第N列"，尝试补充上方表头文本到description
             if col_label.startswith('第') and '列' in col_label:
