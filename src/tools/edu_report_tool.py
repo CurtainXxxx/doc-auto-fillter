@@ -18,7 +18,7 @@ from coze_coding_utils.log.write_log import request_context
 from coze_coding_utils.runtime_ctx.context import new_context
 from storage.memory.memory_saver import get_memory_saver
 
-from tools.template_analyzer import analyze_template
+from tools.template_analyzer import analyze_template, _get_unique_cells
 from tools.docx_validator import strip_inline_formatting, sanitize_fill_text
 from tools.form_filling_state import FormFillingState
 from tools.docx_upload import upload_and_validate, validate_doc
@@ -766,24 +766,24 @@ def _fill_label_fields(doc, label_fields, data):
             if fill_mode == "set":
                 # 标签格+空白格模式：直接设置空白格内容
                 col_idx = f["col_idx"]
-                # 用tr级别获取tc
-                tr = table.rows[ri]._tr
-                tcs = tr.findall(qn("w:tc"))
-                if col_idx < len(tcs):
+                unique_cells = _get_unique_cells(table.rows[ri])
+                if col_idx < len(unique_cells):
+                    tc = unique_cells[col_idx]._element
                     # 获取同行标签格的格式作为格式源
+                    tr = table.rows[ri]._tr
                     rPr_source = _find_label_rPr_in_row(tr)
                     # 使用 v2：智能定位空白/占位符 run，保留词元级格式
-                    _set_tc_text_v2(tcs[col_idx], str(value), mode="set", rPr_source=rPr_source)
-            
+                    _set_tc_text_v2(tc, str(value), mode="set", rPr_source=rPr_source)
+
             elif fill_mode == "replace":
                 # 占位符替换模式
                 col_idx = f["col_idx"]
-                tr = table.rows[ri]._tr
-                tcs = tr.findall(qn("w:tc"))
-                if col_idx < len(tcs):
-                    tc = tcs[col_idx]
+                unique_cells = _get_unique_cells(table.rows[ri])
+                if col_idx < len(unique_cells):
+                    tc = unique_cells[col_idx]._element
                     raw_label = f.get("raw_label", label)
                     existing_value = f.get("existing_value", "")
+                    tr = table.rows[ri]._tr
                     # colon模式 + 日期占位符：在标签后追加签名并替换日期占位符
                     if pattern == "colon" and existing_value and _EMBEDDED_DATE_PAT.search(existing_value):
                         _replace_signature_and_date_in_tc(tc, raw_label, existing_value, str(value))
@@ -794,13 +794,12 @@ def _fill_label_fields(doc, label_fields, data):
                         # 非colon模式：清空格内容后写入新值，使用v2保留格式
                         rPr_source = _find_label_rPr_in_row(tr)
                         _set_tc_text_v2(tc, str(value), mode="replace", rPr_source=rPr_source)
-            
+
             elif fill_mode == "append":
                 col_idx = f["col_idx"]
-                tr = table.rows[ri]._tr
-                tcs = tr.findall(qn("w:tc"))
-                if col_idx < len(tcs):
-                    tc = tcs[col_idx]
+                unique_cells = _get_unique_cells(table.rows[ri])
+                if col_idx < len(unique_cells):
+                    tc = unique_cells[col_idx]._element
                     # 特殊处理：嵌入式日期占位符
                     # 如果existing_value包含"年月日"等日期占位符，替换占位符而非追加
                     if existing_value and _EMBEDDED_DATE_PAT.search(existing_value):

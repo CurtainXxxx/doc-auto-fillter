@@ -118,8 +118,9 @@ def _find_header_for_row(table, row_idx) -> Optional[int]:
 
 def _extract_labels_from_cell(cell) -> list[tuple[str, str]]:
     """从单元格中提取所有"标签: 值"对（冒号模式），返回 [(label, existing_value), ...]
-    
+
     也识别"标签+嵌入式日期占位符"模式（如"考试时间  年  月  日  上午  下午"）
+    以及多段组合单元格（如"审批意见  负责人签名：  年月日  公章"）
     """
     results = []
     text = cell.text.strip().replace('\r', '')
@@ -131,28 +132,55 @@ def _extract_labels_from_cell(cell) -> list[tuple[str, str]]:
         if not line:
             continue
         # 模式1：冒号模式 "标签：值"
-        match = re.match(r'^(.+?)\s*[：:]\s*(.*)', line)
-        if match:
-            label = match.group(1).strip()
-            value = match.group(2).strip()
-            results.append((label, value))
+        # 对于"审批意见  负责人签名：  年月日  公章"这种多段文本，
+        # 用split分段提取每个"短标签：值"对，而非只取第一个冒号
+        if '：' in line or ':' in line:
+            # 按冒号分割，每次取"冒号前的短标签（最后2-15字）:冒号后的值"
+            seg_parts = re.split(r'([：:])', line)
+            for seg_i in range(0, len(seg_parts) - 2, 2):
+                before = seg_parts[seg_i].strip()
+                after = seg_parts[seg_i + 2].strip() if seg_i + 2 < len(seg_parts) else ''
+                # 尝试从before的后部提取短标签（回退到前一个空白处，取最后2-15字）
+                # 如"数据申请部门审批意见     负责人签名" → 标签="负责人签名"
+                short_label = before
+                # 如果before太长，取最后一个空白分隔的短词
+                if len(before) > 15:
+                    space_parts = re.split(r'\s{2,}', before)
+                    if len(space_parts) >= 2 and 1 <= len(space_parts[-1]) <= 15:
+                        short_label = space_parts[-1]
+                    # 也尝试用单个空格/全角空格分隔
+                    alt_parts = re.split(r'[\s　]+', before)
+                    if len(alt_parts) >= 2 and 1 <= len(alt_parts[-1]) <= 15:
+                        short_label = alt_parts[-1]
+                # 标签不能太长或太短
+                if 1 <= len(short_label) <= 20:
+                    # 清理value：截断掉可能混入的后段标签（如"年月日"后还有"公章"）
+                    value = after
+                    # 如果value中有"申请部门公章"等非占位符词，尝试精简
+                    if value and len(value) > 20:
+                        # 保留到日期占位符结束为止
+                        date_end = 0
+                        for m in re.finditer(r'年\s*月\s*日', value):
+                            date_end = m.end()
+                        if date_end > 0 and date_end < len(value):
+                            value = value[:date_end]
+                    results.append((short_label, value))
+                    if seg_i + 2 >= len(seg_parts) - 2:
+                        break  # 只处理最后一个冒号（最内层的标签）
             continue
-        
+
         # 模式2：嵌入式日期占位符 "标签  年  月  日" 或 "标签  年  月  日  上午  下午"
         date_match = _EMBEDDED_DATE_RE.match(line)
         if date_match:
             label = date_match.group(1).strip()
-            # 将日期占位符部分作为existing_value（表示需要替换/追加）
             remaining = line[len(label):].strip()
             results.append((label, remaining))
             continue
-        
+
         # 模式3：标签+填写说明 "主要教学经历（授课名称、起止时间...）"
-        # 括号内是填写指引，需要被替换为实际内容
         hint_match = re.match(r'^(.+?)（[^）]{2,}）\s*$', line)
         if hint_match:
             label = hint_match.group(1).strip()
-            # 将整个文本作为existing_value（含说明），fill_mode=replace
             results.append((label, line))
             continue
 
@@ -193,7 +221,7 @@ def _is_label_cell(cell) -> bool:
 
 
 def _is_placeholder_cell(cell) -> bool:
-    """判断单元格是否是占位符格（如%、……、年月日等）"""
+    """判断单元格是否是占位符格（如%、……、年月日、提示文本等）"""
     text = cell.text.strip()
     if text in _PLACEHOLDER_TEXTS:
         return True
@@ -201,6 +229,15 @@ def _is_placeholder_cell(cell) -> bool:
         return True
     # 宽松匹配：以"年月日"开头且不包含其他实质性文字
     if _DATE_PLACEHOLDER_LOOSE_RE.match(text) and len(text) <= 50:
+        return True
+    # 长提示文本：如"请在此详细说明…"、"请在方框内勾选…"
+    if text.startswith(('请在', '请填写', '请勾选', '请在此', '请选择')):
+        return True
+    # 带括号的描述性提示：如"（授课名称、起止时间…）"
+    if text.startswith('（') and len(text) > 10:
+        return True
+    # 勾选框选项文本：如"□通修基础□专业基础…"
+    if text.startswith('□') and len(text) > 5:
         return True
     return False
 
