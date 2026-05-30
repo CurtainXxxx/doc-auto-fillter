@@ -354,13 +354,18 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
         if last_ai_msg is None and final_messages:
             last_ai_msg = str(final_messages[-1].content) if hasattr(final_messages[-1], "content") else ""
 
-        # 根据 Agent 类型更新状态
-        updates = {"messages": final_messages}
+        # ★ 只返回最后一条 AI 结论，不暴露中间工具调用/失败过程
+        visible_msg = AIMessage(
+            content=f"**[{agent_name.replace('_', ' ').title()}]**\n{last_ai_msg or '(任务完成)'}"
+        )
+        updates = {"messages": [visible_msg]}
 
         if agent_name == "data_agent":
-            # 判断 DataAgent 是否真正完成了数据准备（有 session_id 和 template_path）
+            # 判断 DataAgent 是否真正完成了数据准备
             has_session = False
             has_template_path = False
+
+            # 从 ToolMessage 解析结构化数据（兼容 label_fields / template_fields / summary）
             for m in final_messages:
                 if isinstance(m, ToolMessage) and m.content:
                     try:
@@ -369,17 +374,29 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
                             if "session_id" in parsed:
                                 updates["session_id"] = parsed["session_id"]
                                 has_session = True
-                            if "template_fields" in parsed:
+                            # analyze_uploaded_template 返回 label_fields，不是 template_fields
+                            if "label_fields" in parsed:
+                                updates["template_fields"] = parsed["label_fields"]
+                            elif "template_fields" in parsed:
                                 updates["template_fields"] = parsed["template_fields"]
+                            elif "summary" in parsed and isinstance(parsed.get("summary"), dict):
+                                updates["template_fields"] = [{"_from_summary": True, "total": parsed["summary"].get("total_fields", 0)}]
                             if "template_path" in parsed:
                                 updates["template_path"] = parsed["template_path"]
                                 has_template_path = True
                     except (json.JSONDecodeError, TypeError):
                         pass
 
-            # 只有真正完成了模板分析+初始化才算 data_ready，否则等用户输入
-            if has_session and has_template_path:
+            # ★ 兜底：从 [DATA_OUTPUT] 文本检测模板分析是否完成
+            if last_ai_msg and not updates.get("template_fields"):
+                if re.search(r'(模板分析|字段总数|字段清单)', last_ai_msg):
+                    updates["template_fields"] = [{"_text_parsed": True}]
+
+            # 根据是否有数据准备结果来判定阶段
+            if has_session and updates.get("template_fields"):
                 updates["task_stage"] = "data_ready"
+            elif updates.get("template_fields"):
+                updates["task_stage"] = "data_ready"  # 模板已分析，即使无session也算ready
             else:
                 updates["task_stage"] = "waiting_user_input"
 
