@@ -195,7 +195,7 @@ def _call_llm(system_prompt: str, user_prompt: str, ctx=None) -> str:
                 last_error = e
                 if attempt < 2:
                     time.sleep(2 * (attempt + 1))  # 退避: 2s, 4s
-        raise last_error
+        raise last_error  # type: ignore[misc]
     else:
         from coze_coding_dev_sdk import LLMClient
         client = LLMClient(ctx=ctx)

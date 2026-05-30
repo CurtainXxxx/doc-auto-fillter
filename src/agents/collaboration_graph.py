@@ -203,7 +203,9 @@ def _build_state_summary(state: CollaborationState) -> str:
 
 async def _supervisor_node(state: CollaborationState, config):
     """Supervisor 节点：LLM 理解意图 → 决定路由 + 下发指令"""
-    llm = _supervisor_node._llm  # 从闭包获取构建时注入的 LLM（带 ctx）
+    llm = getattr(_supervisor_node, "_llm", None)  # 从闭包获取构建时注入的 LLM（带 ctx）
+    if llm is None:
+        raise RuntimeError("Supervisor LLM not initialized. Call build_collaboration_graph first.")
 
     state_summary = _build_state_summary(state)
     system_prompt = SUPERVISOR_PROMPT.format(state_summary=state_summary)
@@ -495,7 +497,7 @@ def build_collaboration_graph(ctx=None) -> CompiledStateGraph:
     workflow = StateGraph(CollaborationState)
 
     # 注入 LLM 到 Supervisor 节点（避免节点内部重新创建丢失 ctx）
-    _supervisor_node._llm = llm
+    setattr(_supervisor_node, "_llm", llm)
 
     workflow.add_node("supervisor", _supervisor_node)
     workflow.add_node("data_agent", _make_worker_node(data_agent, "data_agent"))
