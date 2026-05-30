@@ -68,7 +68,8 @@ class CollaborationState(TypedDict):
     # 循环控制
     review_loops: int             # 审查循环计数
     retry_history: list           # 审查退回历史 [{loop, reason, missing_fields}]
-    task_stage: str               # init / data_ready / filled / reviewed_pass / reviewed_fail / generated
+    task_stage: str               # init / data_ready / filled / reviewed_pass / reviewed_fail / generated / agent_refused
+    agent_refused_by: str         # 哪个 Agent 拒绝了任务
 
 
 # ============================================================
@@ -260,6 +261,21 @@ INSTRUCTION: <给目标Agent的具体指令>"""
     if stage == "waiting_user_input":
         next_agent = "END"
 
+    # 守卫0b: Agent 拒绝了任务 → 根据拒绝者重新路由
+    if stage == "agent_refused":
+        refused_by = state.get("agent_refused_by", "")
+        if refused_by == "fill_agent":
+            # FillAgent 拒绝 → 说明任务是 DataAgent 的活，路由到 DataAgent
+            next_agent = "data_agent"
+            instruction = f"FillAgent表示无法执行该任务（任务超出其职责范围）。请DataAgent完成所需工作。原始指令: {instruction}"
+        elif refused_by == "doc_agent":
+            next_agent = "fill_agent"
+            instruction = "DocAgent表示无法执行。请FillAgent先完成填充和审查。"
+        elif refused_by == "data_agent":
+            # DataAgent 拒绝（罕见），尝试让 FillAgent 直接处理
+            next_agent = "fill_agent"
+            instruction = f"DataAgent拒绝，请FillAgent尝试直接处理。原指令: {instruction}"
+
     # 守卫1: 初始状态，没有模板分析 → 必须走 DataAgent
     if stage == "init" and not state.get("template_fields"):
         next_agent = "data_agent"
@@ -268,7 +284,15 @@ INSTRUCTION: <给目标Agent的具体指令>"""
     # 守卫2: DataAgent 完成，有模板分析 → 走 FillAgent
     if stage == "data_ready" and state.get("template_fields"):
         next_agent = "fill_agent"
-        instruction = instruction or "请初始化填写会话，匹配知识到模板字段，并做质量审查"
+        # ★ 指令审查：如果 LLM 的指令是给 DataAgent 的（分析模板/提取数据），必须替换
+        _data_keywords = ["分析模板", "analyze_uploaded_template", "提取字段", "识别字段",
+                          "分析.*docx", "extract_from_old_report", "prefill_from_knowledge"]
+        _is_data_task = instruction and any(re.search(kw, instruction) for kw in _data_keywords)
+        if _is_data_task or not instruction or instruction == "请根据当前状态自主判断需要做什么":
+            instruction = (
+                f"请初始化填写会话（模板路径: {state.get('template_path', '请从上下文获取')}），"
+                "匹配知识到模板字段并批量填入，完成后做质量审查。"
+            )
 
     # 守卫3: FillAgent 审查不通过 → 必须走 DataAgent 补充（关键协商回路）
     if stage == "reviewed_fail" and review_loops < MAX_REVIEW_LOOPS:
@@ -397,6 +421,16 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
         )
         updates = {"messages": [visible_msg]}
 
+        # ★ 检测 Agent 是否明确拒绝了任务
+        _refusal_patterns = [
+            r'超出.*职责范围', r'请派.*处理', r'无权', r'无法执行该任务',
+            r'不在.*能力范围', r'此任务超出', r'职责范围.*请派',
+        ]
+        if last_ai_msg and any(re.search(p, last_ai_msg) for p in _refusal_patterns):
+            updates["task_stage"] = "agent_refused"
+            updates["agent_refused_by"] = agent_name
+            return updates
+
         if agent_name == "data_agent":
             # 判断 DataAgent 是否真正完成了数据准备
             has_session = False
@@ -424,20 +458,16 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
                     except (json.JSONDecodeError, TypeError):
                         pass
 
-            # ★ 兜底：从 [DATA_OUTPUT] 文本检测模板分析是否完成
-            # 只有当state中也没有有效模板数据时才用兜底值，防止覆盖已有的真实字段数据
-            existing_fields = state.get("template_fields") or []
-            is_text_placeholder = (
-                len(existing_fields) == 1
-                and isinstance(existing_fields[0], dict)
-                and existing_fields[0].get("_text_parsed")
-            )
-            if last_ai_msg and not updates.get("template_fields") and not existing_fields:
-                if re.search(r'(模板分析|字段总数|字段清单)', last_ai_msg):
-                    updates["template_fields"] = [{"_text_parsed": True}]
-            elif last_ai_msg and not updates.get("template_fields") and is_text_placeholder:
-                # 已有的是兜底值但这次也没有更好的，保持现状
-                pass
+            # ★ 尝试从 [DATA_OUTPUT] 文本解析真实字段名
+            if last_ai_msg and not updates.get("template_fields", None):
+                parsed_fields = _parse_data_output(last_ai_msg)
+                existing_fields = state.get("template_fields") or []
+                if parsed_fields:
+                    updates["template_fields"] = parsed_fields
+                elif not existing_fields:
+                    # 真没有字段数据才用兜底占位符
+                    if re.search(r'(模板分析|字段总数|字段清单)', last_ai_msg):
+                        updates["template_fields"] = [{"_text_parsed": True}]
 
             # 根据是否有数据准备结果来判定阶段
             if has_session and updates.get("template_fields"):
@@ -492,6 +522,76 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
         return updates
 
     return _worker_node
+
+
+def _parse_data_output(content: str) -> list:
+    """从 DataAgent 的 [DATA_OUTPUT] 文本中解析字段名列表，替代兜底占位符。
+    策略：找 markdown 表格，识别"字段名"列位置，只提取该列的值。
+    """
+    block_match = re.search(r'\[DATA_OUTPUT\](.*?)\[/DATA_OUTPUT\]', content, re.DOTALL | re.IGNORECASE)
+    text = block_match.group(1) if block_match else content
+
+    fields = []
+    field_name_col_idx = None  # "字段名"列的位置（0-based）
+    lines = text.split('\n')
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped.startswith('|'):
+            continue
+        # 跳过分隔行
+        if re.match(r'^\|[\s\-:|]+\|$', stripped):
+            continue
+
+        cells = [c.strip() for c in stripped.split('|')[1:-1]]
+
+        # 检测表头：找"字段名"列
+        if field_name_col_idx is None:
+            for j, cell in enumerate(cells):
+                if cell == '字段名':
+                    field_name_col_idx = j
+                    break
+            if field_name_col_idx is None:
+                # 可能没有"字段名"表头，检查是否是序号+字段名的表格（| # | 字段名 | ...）
+                if len(cells) >= 2 and cells[0] == '#' and cells[1] == '字段名':
+                    field_name_col_idx = 1
+                elif len(cells) >= 2 and cells[0].isdigit() and 2 <= len(cells[1]) <= 30:
+                    # 推测第2列是字段名（| 1 | 课程名称 | ...）
+                    field_name_col_idx = 1
+            continue  # 跳过表头行
+
+        if field_name_col_idx is None or field_name_col_idx >= len(cells):
+            continue
+
+        candidate = cells[field_name_col_idx]
+
+        # 过滤：不是有效字段名
+        if not candidate or len(candidate) < 2 or len(candidate) > 40:
+            continue
+        if re.match(r'^\d+$', candidate):  # 纯数字
+            continue
+        if re.match(r'^\d+列$', candidate):  # 如"5列"
+            continue
+        if re.match(r'^\d+行$', candidate):  # 如"5行"
+            continue
+        if re.match(r'^T\d+_G\d+$', candidate):  # 行组ID如 T1_G1
+            continue
+        if candidate in ('字段名', '类型', '说明', '提示', '序号', '#', '行组ID', '列数', '模板行数', '列名'):
+            continue
+        # 过滤包含顿号的长字符串（如"考核环节、课程目标1、课程目标2"）
+        if '、' in candidate and len(candidate) > 20:
+            continue
+
+        fields.append(candidate)
+
+    # 去重保持顺序
+    seen = set()
+    result = []
+    for f in fields:
+        if f not in seen:
+            seen.add(f)
+            result.append(f)
+    return result
 
 
 def _parse_fill_report(content: str) -> dict | None:
