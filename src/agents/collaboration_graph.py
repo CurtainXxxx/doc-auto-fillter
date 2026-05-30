@@ -201,7 +201,7 @@ def _build_state_summary(state: CollaborationState) -> str:
     return "\n".join(f"- {p}" for p in summary_parts)
 
 
-async def _supervisor_node(state: CollaborationState, config):
+def _supervisor_node(state: CollaborationState, config):
     """Supervisor 节点：LLM 理解意图 → 决定路由 + 下发指令"""
     llm = getattr(_supervisor_node, "_llm", None)  # 从闭包获取构建时注入的 LLM（带 ctx）
     if llm is None:
@@ -228,7 +228,7 @@ INSTRUCTION: <给目标Agent的具体指令>"""
         HumanMessage(content=decision_prompt),
     ]
 
-    response = await llm.ainvoke(messages)
+    response = llm.invoke(messages)
     content = response.content if hasattr(response, "content") else str(response)
 
     # 解析 LLM 决策
@@ -246,6 +246,10 @@ INSTRUCTION: <给目标Agent的具体指令>"""
     stage = state.get("task_stage", "init")
     fill_report = state.get("fill_report", {})
     review_loops = state.get("review_loops", 0)
+
+    # 守卫0: 等待用户输入 → 必须返回 END（防止死循环）
+    if stage == "waiting_user_input":
+        next_agent = "END"
 
     # 守卫1: 初始状态，没有模板分析 → 必须走 DataAgent
     if stage == "init" and not state.get("template_fields"):
@@ -314,7 +318,7 @@ INSTRUCTION: <给目标Agent的具体指令>"""
 def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
     """创建 Worker 节点：调用 create_agent 子图执行专项任务"""
 
-    async def _worker_node(state: CollaborationState, config):
+    def _worker_node(state: CollaborationState, config):
         instruction = state.get("supervisor_instruction", "请开始工作")
 
         # 补充上下文给 Worker
@@ -333,7 +337,7 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
         worker_input = "\n\n".join(context_parts)
 
         # 调用子 Agent
-        result = await agent_graph.ainvoke(
+        result = agent_graph.invoke(
             {"messages": [HumanMessage(content=worker_input)]},
             config,
         )
@@ -354,9 +358,9 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
         updates = {"messages": final_messages}
 
         if agent_name == "data_agent":
-            # 从 DataAgent 输出中解析模板和知识
-            updates["task_stage"] = "data_ready"
-            # 尝试从消息中提取 session_id 和 template_path
+            # 判断 DataAgent 是否真正完成了数据准备（有 session_id 和 template_path）
+            has_session = False
+            has_template_path = False
             for m in final_messages:
                 if isinstance(m, ToolMessage) and m.content:
                     try:
@@ -364,12 +368,20 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
                         if isinstance(parsed, dict):
                             if "session_id" in parsed:
                                 updates["session_id"] = parsed["session_id"]
+                                has_session = True
                             if "template_fields" in parsed:
                                 updates["template_fields"] = parsed["template_fields"]
                             if "template_path" in parsed:
                                 updates["template_path"] = parsed["template_path"]
+                                has_template_path = True
                     except (json.JSONDecodeError, TypeError):
                         pass
+
+            # 只有真正完成了模板分析+初始化才算 data_ready，否则等用户输入
+            if has_session and has_template_path:
+                updates["task_stage"] = "data_ready"
+            else:
+                updates["task_stage"] = "waiting_user_input"
 
         elif agent_name == "fill_agent":
             # 解析 FillAgent 的审查报告
@@ -392,7 +404,13 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
                 if report.get("confidence_scores"):
                     updates["confidence_scores"] = report["confidence_scores"]
             else:
-                updates["task_stage"] = "filled"
+                # 没有审查报告：判断是否只是问用户问题
+                # 检查是否有 ToolMessage（说明调用了工具），如果没有则等用户输入
+                has_tool_call = any(isinstance(m, ToolMessage) for m in final_messages)
+                if has_tool_call:
+                    updates["task_stage"] = "filled"
+                else:
+                    updates["task_stage"] = "waiting_user_input"
 
             # 提取 session_id
             for m in final_messages:
