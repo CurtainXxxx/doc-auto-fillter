@@ -203,7 +203,7 @@ def _build_state_summary(state: CollaborationState) -> str:
 
 async def _supervisor_node(state: CollaborationState, config):
     """Supervisor 节点：LLM 理解意图 → 决定路由 + 下发指令"""
-    llm = _build_llm()
+    llm = _supervisor_node._llm  # 从闭包获取构建时注入的 LLM（带 ctx）
 
     state_summary = _build_state_summary(state)
     system_prompt = SUPERVISOR_PROMPT.format(state_summary=state_summary)
@@ -261,6 +261,11 @@ INSTRUCTION: <给目标Agent的具体指令>"""
         reason = fill_report.get("review_note", "需要补充数据")
         next_agent = "data_agent"
         instruction = f"审查不通过（第{review_loops}次）。缺失字段: {missing}。审查意见: {reason}。请针对性重新提取数据。"
+
+    # 守卫3b: FillAgent 审查报告无法解析（stage=filled），当作通过处理，直接生成
+    if stage == "filled":
+        next_agent = "doc_agent"
+        instruction = instruction or "填充已完成，请生成最终文档"
 
     # 守卫4: FillAgent 审查通过 → 走 DocAgent
     if stage == "reviewed_pass" or (stage == "reviewed_fail" and review_loops >= MAX_REVIEW_LOOPS):
@@ -488,6 +493,9 @@ def build_collaboration_graph(ctx=None) -> CompiledStateGraph:
 
     # 构建协作图
     workflow = StateGraph(CollaborationState)
+
+    # 注入 LLM 到 Supervisor 节点（避免节点内部重新创建丢失 ctx）
+    _supervisor_node._llm = llm
 
     workflow.add_node("supervisor", _supervisor_node)
     workflow.add_node("data_agent", _make_worker_node(data_agent, "data_agent"))
