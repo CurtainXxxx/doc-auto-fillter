@@ -181,7 +181,16 @@ def _build_state_summary(state: CollaborationState) -> str:
     if state.get("template_path"):
         summary_parts.append(f"模板路径: {state['template_path']}")
     if state.get("template_fields"):
-        summary_parts.append(f"模板字段: 已分析 {len(state['template_fields'])} 个字段")
+        fields = state["template_fields"]
+        # 区分真实字段数据和兜底占位符
+        is_placeholder = (
+            len(fields) == 1 and isinstance(fields[0], dict)
+            and (fields[0].get("_text_parsed") or fields[0].get("_from_summary"))
+        )
+        if is_placeholder:
+            summary_parts.append("模板字段: ⚠️ 未获取到结构化字段（仅有文本摘要），需要DataAgent重新分析")
+        else:
+            summary_parts.append(f"模板字段: 已分析 {len(fields)} 个字段")
     if state.get("session_id"):
         summary_parts.append(f"填写会话: {state['session_id']}")
     if state.get("knowledge_cache"):
@@ -265,8 +274,13 @@ INSTRUCTION: <给目标Agent的具体指令>"""
     if stage == "reviewed_fail" and review_loops < MAX_REVIEW_LOOPS:
         missing = fill_report.get("missing_fields", [])
         reason = fill_report.get("review_note", "需要补充数据")
-        next_agent = "data_agent"
-        instruction = f"审查不通过（第{review_loops}次）。缺失字段: {missing}。审查意见: {reason}。请针对性重新提取数据。"
+        # 如果 LLM 已经决策走 data_agent 且给出了具体指令，追加审查上下文而不是覆盖
+        review_context = f"\n[审查退回-第{review_loops}次] 缺失: {missing}。{reason}"
+        if next_agent == "data_agent" and instruction and instruction != "请根据当前状态自主判断需要做什么":
+            instruction = instruction + review_context
+        else:
+            next_agent = "data_agent"
+            instruction = f"审查不通过（第{review_loops}次）。缺失字段: {missing}。审查意见: {reason}。请针对性重新提取数据。"
 
     # 守卫3b: FillAgent 审查报告无法解析（stage=filled），当作通过处理，直接生成
     if stage == "filled":
@@ -292,6 +306,25 @@ INSTRUCTION: <给目标Agent的具体指令>"""
     elif any(kw in last_user_msg for kw in ["查", "看", "状态", "进度"]):
         user_intent = "check_status"
 
+    # ★ 提取模板路径：扫描所有消息和指令中的 /tmp/*.docx 路径
+    template_path = state.get("template_path", "")
+    if not template_path:
+        # 扫描所有消息内容
+        for m in state.get("messages", []):
+            try:
+                content = m.content if hasattr(m, "content") and isinstance(m.content, str) else ""
+            except Exception:
+                content = ""
+            found = re.findall(r'/tmp/[\w.-]+\.docx?', content)
+            if found:
+                template_path = found[0]
+                break
+        # 也扫描 LLM 指令
+        if not template_path:
+            found = re.findall(r'/tmp/[\w.-]+\.docx?', instruction)
+            if found:
+                template_path = found[0]
+
     # 输出决策日志（评审可见）
     agent_names = {
         "data_agent": "📄 DataAgent（数据理解）",
@@ -308,6 +341,7 @@ INSTRUCTION: <给目标Agent的具体指令>"""
         "user_intent": user_intent,
         "next_agent": next_agent,
         "supervisor_instruction": instruction or "请根据当前状态自主判断需要做什么",
+        "template_path": template_path,
         "messages": [AIMessage(content=decision_msg)],
     }
 
@@ -323,8 +357,11 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
 
         # 补充上下文给 Worker
         context_parts = [f"## Supervisor 指令\n{instruction}"]
-        if state.get("template_path"):
-            context_parts.append(f"## 模板路径\n{state['template_path']}")
+
+        # ★ 关键：明确传递模板路径，防止 Agent 用错模板
+        template_path = state.get("template_path", "")
+        if template_path:
+            context_parts.insert(0, f"## ⚠️ 当前模板文件（必须使用此路径！）\n{template_path}")
         if state.get("template_fields"):
             context_parts.append(f"## 模板字段\n{json.dumps(state['template_fields'], ensure_ascii=False)[:3000]}")
         if state.get("session_id"):
@@ -388,9 +425,19 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str):
                         pass
 
             # ★ 兜底：从 [DATA_OUTPUT] 文本检测模板分析是否完成
-            if last_ai_msg and not updates.get("template_fields"):
+            # 只有当state中也没有有效模板数据时才用兜底值，防止覆盖已有的真实字段数据
+            existing_fields = state.get("template_fields") or []
+            is_text_placeholder = (
+                len(existing_fields) == 1
+                and isinstance(existing_fields[0], dict)
+                and existing_fields[0].get("_text_parsed")
+            )
+            if last_ai_msg and not updates.get("template_fields") and not existing_fields:
                 if re.search(r'(模板分析|字段总数|字段清单)', last_ai_msg):
                     updates["template_fields"] = [{"_text_parsed": True}]
+            elif last_ai_msg and not updates.get("template_fields") and is_text_placeholder:
+                # 已有的是兜底值但这次也没有更好的，保持现状
+                pass
 
             # 根据是否有数据准备结果来判定阶段
             if has_session and updates.get("template_fields"):
@@ -470,19 +517,63 @@ def _parse_fill_report(content: str) -> dict | None:
     if fill_match:
         report["fill_rate"] = float(fill_match.group(1))
 
-    # 解析缺失字段
-    missing_match = re.search(r'缺失必填字段[：:]\s*\[(.+?)\]', report_text, re.DOTALL)
-    if missing_match:
-        report["missing_fields"] = [f.strip() for f in missing_match.group(1).split(",") if f.strip()]
-    else:
-        report["missing_fields"] = []
+    # 解析缺失字段（兼容3种格式）
+    missing_fields = _parse_missing_fields(report_text)
+    report["missing_fields"] = missing_fields
 
-    # 解析审查意见
-    note_match = re.search(r'审查意见[：:]\s*(.+?)(?:\n|$)', report_text)
+    # 解析审查意见（支持多行，直到下一个标签或块结束）
+    note_match = re.search(r'审查意见[：:]\s*(.+?)$', report_text, re.MULTILINE | re.DOTALL)
     if note_match:
-        report["review_note"] = note_match.group(1).strip()
+        note = note_match.group(1).strip()
+        # 截取到第一个有意义换行+标点前的内容，但要足够长
+        # 只需前200字符作为摘要
+        report["review_note"] = note[:300].replace("\n", " ").strip()
+    else:
+        report["review_note"] = ""
 
     return report
+
+
+def _parse_missing_fields(report_text: str) -> list:
+    """从审查报告文本中解析缺失字段列表，兼容3种格式：
+    格式A（标准）: 缺失必填字段: [字段1, 字段2, 字段3]
+    格式B（中文列表）: 缺失必填字段: 字段1、字段2、字段3
+    格式C（Markdown列表）:
+        缺失必填字段:
+        · 字段1 (T0_R0_C1)
+        - 字段2 (T0_R1_C1)
+    """
+    # 格式A: 方括号包裹 [字段1, 字段2]
+    bracket_match = re.search(r'缺失必填字段[：:]\s*\[(.+?)\]', report_text, re.DOTALL)
+    if bracket_match:
+        return [f.strip() for f in bracket_match.group(1).split(",") if f.strip()]
+
+    # 格式C: Markdown/符号列表（- 或 · 开头），在"缺失必填字段"到下一个标签之间
+    mf_start = re.search(r'缺失必填字段[：:]', report_text)
+    if mf_start:
+        after_label = report_text[mf_start.end():]
+        # 截取到下一个标签（如"审查意见""逻辑错误"等）或 [/FILL_REPORT]
+        next_tag = re.search(r'\n(?:审查意见|逻辑错误|已填[：:]|\Z)', after_label)
+        section = after_label[:next_tag.start()] if next_tag else after_label
+
+        # 提取符号列表项
+        bullets = re.findall(r'^\s*[-·•]\s*(.+?)(?:\s*\([^)]*\))?\s*$', section, re.MULTILINE)
+        if bullets:
+            return [b.strip() for b in bullets if b.strip()]
+
+        # 格式B: 顿号/逗号/中文逗号分隔的枚举
+        # 如: "全部14个字段均未填写，包括：字段1、字段2、字段3"
+        enum_text = section.strip()
+        # 移除引导语（"全部X个字段均未填写" 等）
+        enum_text = re.sub(r'^全部\d+个字段均未填写[，,：:]?\s*(?:包括[：:]?\s*)?', '', enum_text)
+        if enum_text and len(enum_text) < 500:
+            # 用中文/英文逗号、顿号分隔
+            parts = re.split(r'[，,、]', enum_text)
+            fields = [p.strip() for p in parts if p.strip() and len(p.strip()) < 50]
+            if fields:
+                return fields
+
+    return []
 
 
 # ============================================================
