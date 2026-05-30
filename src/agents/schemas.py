@@ -71,3 +71,13 @@ class DocGenerationResult(BaseModel):
     filled_count: int = 0
     success: bool = True
     error_message: str = ""
+
+
+# ============================================================
+# Supervisor 产出
+# ============================================================
+class SupervisorDecision(BaseModel):
+    """Supervisor LLM 的路由决策（with_structured_output）"""
+    goto: Literal["data_agent", "fill_agent", "doc_agent", "END"]
+    reasoning: str = ""
+    instruction: str = ""

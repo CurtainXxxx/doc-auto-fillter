@@ -49,6 +49,7 @@ from .specialist_prompts import (
 )
 from .schemas import (
     DataAgentOutput, FillReport as FillReportSchema, DocGenerationResult,
+    SupervisorDecision,
 )
 
 LLM_CONFIG = "config/agent_llm_config.json"
@@ -251,10 +252,10 @@ def _resolve_transition(stage: str, state: CollaborationState) -> str:
             return "doc_agent"  # 超过最大循环，强制生成
 
     if stage == "generated":
-        return "END"
+        return END
 
     if stage == "waiting_user_input":
-        return "END"
+        return END
 
     if stage == "agent_refused":
         refused_by = state.get("agent_refused_by", "")
@@ -263,7 +264,7 @@ def _resolve_transition(stage: str, state: CollaborationState) -> str:
         if refused_by in ("doc_agent", "data_agent"):
             return "fill_agent"
 
-    return "END"
+    return END
 
 
 # ============================================================
@@ -345,32 +346,97 @@ def _detect_user_intent(state: CollaborationState) -> str:
     return state.get("user_intent", "full_fill")
 
 
+def _goto_display(goto: str | object) -> str:
+    """将 goto 目标转换为可显示的字符串。"""
+    if goto is END:
+        return "END"
+    return str(goto)
+
+
+def _guard_route(llm_goto: str, stage: str, state: CollaborationState) -> str | object:
+    """安全守卫：硬拦截 LLM 的非法路由决策。
+
+    硬规则（不可被 LLM 覆盖）：
+    - 不能在非结束阶段选 END
+    - agent_refused 必须按 refused_by 路由
+
+    其余情况信任 LLM 决策。
+    返回字符串（节点名/"END"）或 END 哨兵。
+    """
+    # 硬规则1：不能在非结束阶段选 END
+    if llm_goto == "END":
+        if stage not in ("generated", "waiting_user_input"):
+            return _resolve_transition(stage, state)
+
+    # 硬规则2：agent_refused 必须按规定路由
+    if stage == "agent_refused":
+        return _resolve_transition(stage, state)
+
+    # 其余：信任 LLM
+    return llm_goto
+
+
+def _enrich_instruction(instruction: str, goto_str: str, stage: str,
+                        state: CollaborationState, template_path: str) -> str:
+    """根据路由目标补充默认指令（LLM 未给出时）。"""
+    if instruction and len(instruction.strip()) >= 10:
+        return instruction
+
+    if goto_str == "data_agent":
+        if stage == "init":
+            return "请分析模板结构并提取上传材料中的知识"
+        elif stage == "reviewed_fail":
+            fill_report = state.get("fill_report", {})
+            missing = fill_report.get("missing_fields", [])
+            review_note = fill_report.get("review_note", "")
+            review_loops = state.get("review_loops", 0)
+            return (
+                f"审查不通过（第{review_loops}次）。缺失字段: {missing}。"
+                f"审查意见: {review_note}。请针对性重新提取数据。"
+            )
+    elif goto_str == "fill_agent":
+        return (
+            f"请初始化填写会话（模板路径: {template_path or '请从上下文获取'}），"
+            "匹配知识到模板字段并批量填入，完成后做质量审查。"
+        )
+    elif goto_str == "doc_agent":
+        if stage == "reviewed_fail" and state.get("review_loops", 0) >= MAX_REVIEW_LOOPS:
+            return f"审查已达上限（{MAX_REVIEW_LOOPS}次），强制生成。未通过项已在报告中标注。"
+        return "审查已通过，请生成最终文档"
+
+    return "请根据当前状态自主判断需要做什么"
+
+
 def _make_supervisor_node(llm):
-    """创建 Supervisor 节点（工厂函数，llm 显式传入避免闭包陷阱）"""
+    """创建 Supervisor 节点（工厂函数，llm 显式传入避免闭包陷阱）。
+
+    v2.1: LLM 通过 with_structured_output(SupervisorDecision) 输出路由决策，
+    跳转表降级为安全守卫（拦截非法决策）。
+    """
 
     def _supervisor_node(state: CollaborationState, config):
+        stage = state.get("task_stage", "init")
         state_summary = _build_state_summary(state)
         system_prompt = SUPERVISOR_PROMPT.format(state_summary=state_summary)
 
-        # 获取最近的用户消息
+        # 获取用户消息
         recent_user_msgs = [
             m for m in state.get("messages", [])
             if hasattr(m, "type") and m.type == "human"
         ]
         last_user_msg = recent_user_msgs[-1].content if recent_user_msgs else "无用户消息"
 
-        # 推断用户意图
+        # 推断用户意图 + 提取模板路径
         user_intent = _detect_user_intent(state)
-
-        # 提取模板路径
         instruction_hint = ""
         template_path = _extract_template_path_from_messages(state, instruction_hint)
 
-        # LLM 分析意图并生成指令（不再解析路由目标，路由由跳转表决定）
+        # ================================================================
+        # Step 1: LLM 结构化路由决策（with_structured_output）
+        # ================================================================
         decision_prompt = (
             f"用户最新消息: \"{last_user_msg}\"\n\n"
-            "请根据当前状态，为目标 Agent 写一条清晰的工作指令（不要指定路由目标，系统会自动路由）。\n"
-            "格式：直接写自然语言指令即可，无需 NEXT_AGENT 标记。"
+            "请分析当前状态，决定下一步应该由哪个 Agent 执行，并给出指令。"
         )
 
         messages = [
@@ -378,54 +444,52 @@ def _make_supervisor_node(llm):
             HumanMessage(content=decision_prompt),
         ]
 
-        response = llm.invoke(messages)
-        instruction = response.content if hasattr(response, "content") else str(response)
+        llm_goto = "data_agent"  # 默认值（LLM 失败时使用）
+        llm_reasoning = ""
+        llm_instruction = ""
 
-        # 清理 LLM 可能输出的路由标记
-        instruction = re.sub(r'\bNEXT_AGENT\s*:.*', '', instruction).strip()
+        try:
+            decision_llm = llm.with_structured_output(SupervisorDecision)
+            decision = decision_llm.invoke(messages)
+            llm_goto = decision.goto
+            llm_reasoning = decision.reasoning or ""
+            llm_instruction = decision.instruction or ""
+        except Exception:
+            # with_structured_output 失败 → 用跳转表兜底
+            pass
 
-        # ---- 跳转表决定路由目标 ----
-        stage = state.get("task_stage", "init")
-        target = _resolve_transition(stage, state)
+        # ================================================================
+        # Step 2: 安全守卫 — 拦截非法决策
+        # ================================================================
+        validated_goto = _guard_route(llm_goto, stage, state)
+        validated_goto_str = _goto_display(validated_goto)
 
-        # 根据目标补充/调整指令
-        if target == "data_agent" and stage == "init":
-            if not instruction or len(instruction) < 10:
-                instruction = "请分析模板结构并提取上传材料中的知识"
-        elif target == "data_agent" and stage == "reviewed_fail":
-            fill_report = state.get("fill_report", {})
-            missing = fill_report.get("missing_fields", [])
-            review_note = fill_report.get("review_note", "")
-            review_loops = state.get("review_loops", 0)
-            instruction = (
-                f"审查不通过（第{review_loops}次）。缺失字段: {missing}。"
-                f"审查意见: {review_note}。请针对性重新提取数据。"
-            )
-        elif target == "fill_agent" and stage in ("data_ready", "init"):
-            instruction = (
-                f"请初始化填写会话（模板路径: {template_path or '请从上下文获取'}），"
-                "匹配知识到模板字段并批量填入，完成后做质量审查。"
-            )
-        elif target == "doc_agent":
-            if stage == "reviewed_fail" and state.get("review_loops", 0) >= MAX_REVIEW_LOOPS:
-                instruction = f"审查已达上限（{MAX_REVIEW_LOOPS}次），强制生成。未通过项已在报告中标注。"
-            else:
-                instruction = instruction or "审查已通过，请生成最终文档"
-
-        # 输出决策日志（评审可见）
-        display_name = AGENT_DISPLAY_NAMES.get(target, target)
-        decision_msg = (
-            f"**[Supervisor]** → {display_name}\n> {instruction}"
-            if instruction else f"**[Supervisor]** → {display_name}"
+        # ================================================================
+        # Step 3: 指令补充
+        # ================================================================
+        instruction = _enrich_instruction(
+            llm_instruction, validated_goto_str, stage, state, template_path
         )
 
+        # ================================================================
+        # Step 4: 构建 Command
+        # ================================================================
+        goto_target = END if validated_goto is END or validated_goto_str == "END" else validated_goto
+
+        display_name = AGENT_DISPLAY_NAMES.get(validated_goto_str, validated_goto_str)
+        decision_msg_parts = [f"**[Supervisor]** → {display_name}"]
+        if llm_reasoning:
+            decision_msg_parts.append(f"> *决策理由*: {llm_reasoning}")
+        if instruction:
+            decision_msg_parts.append(f"> {instruction}")
+
         return Command(
-            goto=target,
+            goto=goto_target,
             update={
                 "user_intent": user_intent,
                 "supervisor_instruction": instruction or "请根据当前状态自主判断需要做什么",
                 "template_path": template_path,
-                "messages": [AIMessage(content=decision_msg)],
+                "messages": [AIMessage(content="\n".join(decision_msg_parts))],
             }
         )
 
@@ -611,12 +675,14 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str,
 # 构建多智能体协作图
 # ============================================================
 def build_collaboration_graph(ctx=None) -> CompiledStateGraph:
-    """构建 3+1 多智能体协作 StateGraph (v2)
+    """构建 3+1 多智能体协作 StateGraph (v2.1)
 
     路由机制:
-    - Supervisor 返回 Command(goto=跳转表目标) 实现动态路由
+    - Supervisor LLM 用 with_structured_output(SupervisorDecision) 输出路由决策
+    - _guard_route() 做硬规则守卫（拦截非法 END / agent_refused 路由）
+    - _resolve_transition() 是守卫的兜底规则表
     - Worker 返回 Command(goto="supervisor") 回到协调者
-    - 仅用 add_edge 做静态回退，不依赖 conditional_edges
+    - 仅用 add_edge，不依赖 conditional_edges
     """
     llm = _build_llm(ctx)
 
@@ -663,8 +729,8 @@ def build_collaboration_graph(ctx=None) -> CompiledStateGraph:
     ))
 
     # 静态边：START → supervisor，所有 Worker → supervisor
+    # Command(goto=...) 负责所有动态路由，无需 conditional_edges 或回退边
     workflow.add_edge(START, "supervisor")
-    workflow.add_edge("supervisor", END)  # 回退边（Command 优先）
     workflow.add_edge("data_agent", "supervisor")
     workflow.add_edge("fill_agent", "supervisor")
     workflow.add_edge("doc_agent", "supervisor")
