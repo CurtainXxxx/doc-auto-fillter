@@ -958,7 +958,7 @@ def _detect_multi_column_fields(table, t_idx: int, r_idx: int, unique_cells: lis
                 continue
             # 纯数字也作为行标签（如关联矩阵中的题号1,2,3...）
             if re.match(r'^[\d]+$', text):
-                row_label = f"题{text}"  # 给数字标签添加语义前缀
+                row_label = f"第{text}题"  # "第1题"比"题1"更匹配知识文件中的"第1题10分"
                 continue
         
         # 跳过已被label_blank模式识别的格
