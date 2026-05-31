@@ -117,6 +117,7 @@ class CollaborationState(TypedDict):
     retry_history: list           # 审查退回历史 [{loop, reason, missing_fields}]
     task_stage: str               # init / data_ready / filled / reviewed_pass / reviewed_fail / generated / agent_refused / waiting_user_input
     agent_refused_by: str         # 哪个 Agent 的 structured_output 失败了
+    refused_count: int            # agent_refused 计数（断路保护，≥2 强制 END）
 
 
 # ============================================================
@@ -258,6 +259,9 @@ def _resolve_transition(stage: str, state: CollaborationState) -> str:
         return END
 
     if stage == "agent_refused":
+        refused_count = state.get("refused_count", 0)
+        if refused_count >= 2:
+            return END  # 断路保护：2次 agent_refused 后强制结束
         refused_by = state.get("agent_refused_by", "")
         if refused_by == "fill_agent":
             return "data_agent"
@@ -525,6 +529,63 @@ def _build_worker_context(state: CollaborationState, instruction: str) -> str:
     return "\n\n".join(context_parts)
 
 
+def _salvage_from_react_output(agent_name: str, final_messages: list,
+                               state: CollaborationState) -> dict | None:
+    """从 ReAct 工具输出中抢救数据（Coze 不支持 with_structured_output 时）。
+
+    直接从 ToolMessage 中解析关键字段，跳过 LLM 结构化提取步骤。
+    返回 updates dict 或 None（无法抢救，需设 agent_refused）。
+    """
+    updates: dict = {}
+
+    for m in final_messages:
+        if not isinstance(m, ToolMessage) or not m.content:
+            continue
+        try:
+            parsed = json.loads(m.content)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+
+        # 通用字段
+        if "session_id" in parsed:
+            updates["session_id"] = parsed["session_id"]
+
+        # DataAgent: 模板字段
+        if agent_name == "data_agent" and "fields" in parsed:
+            updates["template_fields"] = parsed["fields"]
+        if agent_name == "data_agent" and "template_type" in parsed:
+            updates["_template_type"] = parsed["template_type"]
+
+        # FillAgent: 审查报告
+        if agent_name == "fill_agent" and ("fill_rate" in parsed or "filled_count" in parsed):
+            updates["fill_report"] = parsed
+
+        # DocAgent: 文件路径
+        if agent_name == "doc_agent" and "file_path" in parsed:
+            updates["doc_result"] = parsed
+
+    # 根据抢救结果设置 task_stage
+    if agent_name == "data_agent" and updates.get("template_fields"):
+        updates["task_stage"] = "data_ready"
+    elif agent_name == "fill_agent" and updates.get("fill_report"):
+        rpt = updates["fill_report"]
+        if rpt.get("passed") or rpt.get("fill_rate", 0) >= 80:
+            updates["task_stage"] = "reviewed_pass"
+        else:
+            updates["task_stage"] = "reviewed_fail"
+            updates["review_loops"] = state.get("review_loops", 0) + 1
+    elif agent_name == "doc_agent" and updates.get("doc_result"):
+        updates["task_stage"] = "generated"
+    elif agent_name == "fill_agent" and updates.get("session_id"):
+        updates["task_stage"] = "filled"  # 有会话但无审查报告
+    else:
+        return None  # 无法抢救
+
+    return updates
+
+
 def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str,
                       llm: ChatOpenAI, output_schema: type):
     """创建 Worker 节点（工厂函数，llm/output_schema 显式传入避免闭包陷阱）
@@ -532,7 +593,7 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str,
     流程:
     1. ReAct 循环：agent_graph.invoke() 执行工具调用
     2. with_structured_output(schema)：从对话中提取结构化数据
-    3. 失败处理：structured_output 异常时设 agent_refused（不静默吞掉）
+    3. 失败处理：先尝试从 ReAct 输出抢救数据，失败才设 agent_refused
     """
 
     async def _worker_node(state: CollaborationState, config):
@@ -575,12 +636,27 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str,
             structured_result = structured_llm.invoke(extraction_messages)
             structured_data = structured_result.model_dump() if hasattr(structured_result, "model_dump") else structured_result
         except Exception as e:
-            # structured_output 失败 → agent_refused（不静默吞掉）
+            # structured_output 失败 → 先尝试从 ReAct 输出抢救数据
+            salvaged = _salvage_from_react_output(agent_name, final_messages, state)
+            if salvaged is not None:
+                # 抢救成功：跳过结构化提取，直接用 ReAct 输出
+                visible_msg = AIMessage(
+                    content=(
+                        f"**[{AGENT_DISPLAY_NAMES.get(agent_name, agent_name)}]**\n"
+                        f"{last_ai_msg or '(任务完成)'}\n\n"
+                        f"ℹ️ 结构化提取不可用，已从工具输出直接解析数据。"
+                    )
+                )
+                salvaged["messages"] = [visible_msg]
+                return Command(goto="supervisor", update=salvaged)
+
+            # 抢救失败 → agent_refused（含断路计数）
+            refused_count = state.get("refused_count", 0) + 1
             visible_msg = AIMessage(
                 content=(
                     f"**[{AGENT_DISPLAY_NAMES.get(agent_name, agent_name)}]**\n"
                     f"{last_ai_msg or '(任务完成)'}\n\n"
-                    f"⚠️ 结构化输出提取失败: {str(e)}"
+                    f"⚠️ 结构化输出提取失败且无法从工具输出恢复: {str(e)}"
                 )
             )
             return Command(
@@ -588,6 +664,7 @@ def _make_worker_node(agent_graph: CompiledStateGraph, agent_name: str,
                 update={
                     "task_stage": "agent_refused",
                     "agent_refused_by": agent_name,
+                    "refused_count": refused_count,
                     "messages": [visible_msg],
                 }
             )
@@ -729,8 +806,9 @@ def build_collaboration_graph(ctx=None) -> CompiledStateGraph:
     ))
 
     # 静态边：START → supervisor，所有 Worker → supervisor
-    # Command(goto=...) 负责所有动态路由，无需 conditional_edges 或回退边
+    # Command(goto=...) 负责动态路由。add_edge 是 Command 不兼容时（如 Coze 旧版）的回退
     workflow.add_edge(START, "supervisor")
+    workflow.add_edge("supervisor", END)  # Coze 不支持 Command 时的安全网
     workflow.add_edge("data_agent", "supervisor")
     workflow.add_edge("fill_agent", "supervisor")
     workflow.add_edge("doc_agent", "supervisor")
