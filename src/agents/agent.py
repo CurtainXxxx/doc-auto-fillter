@@ -1,4 +1,4 @@
-"""高校教务办公数字员工 - 专业课程目标达成度评价报告生成Agent"""
+"""高校教务办公数字员工 - 支持单Agent模式和多Agent协作模式"""
 
 import os
 import json
@@ -30,6 +30,7 @@ from tools.old_report_extractor import (
     inject_form_states as _inject_form_states,
 )
 from tools.edu_report_tool import _active_form_states
+from .collaboration_graph import build_collaboration_graph
 
 LLM_CONFIG = "config/agent_llm_config.json"
 
@@ -116,11 +117,23 @@ def sanitize_before_llm(request, handler):
 
 
 def build_agent(ctx=None):
+    """构建Agent实例。
+    通过 config/agent_llm_config.json 中的 agent_mode 切换模式：
+    - "multi": 多Agent协作模式（Supervisor + DataAgent + FillAgent + DocAgent）
+    - "single": 单Agent模式（兼容旧版，一个Agent管全部）
+    """
     workspace_path = os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects")
     config_path = os.path.join(workspace_path, LLM_CONFIG)
 
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = json.load(f)
+
+    # 多Agent协作模式
+    agent_mode = cfg.get("agent_mode", "single")
+    if agent_mode == "multi":
+        return build_collaboration_graph(ctx)
+
+    # ---- 以下为单Agent模式（兼容旧版） ----
 
     # 支持外部模型API：设置 EXTERNAL_LLM_API_KEY 即可切换
     ext_api_key = os.getenv("EXTERNAL_LLM_API_KEY")
